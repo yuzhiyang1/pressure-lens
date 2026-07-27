@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pressure Lens Overlay</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./overlay.css?v=9" />
+  </head>
+  <body>
+    <main class="desktop-lens" id="desktop-lens" aria-label="桌面压力黑洞">
+      <canvas id="blackhole-canvas" aria-hidden="true"></canvas>
+      <div class="gravity-lock" id="gravity-lock" aria-hidden="true">
+        <div class="gravity-lock__field">
+          <span class="gravity-lock__orbit"></span>
+          <span class="gravity-lock__progress"></span>
+          <span class="gravity-lock__satellites"></span>
+          <span class="gravity-lock__reticle"></span>
+        </div>
+        <div class="gravity-lock__copy">
+          <strong id="gravity-lock-title">引力感应</strong>
+          <span id="gravity-lock-detail">保持悬停 2.0s</span>
+        </div>
+      </div>
+      <div class="move-hint" id="move-hint" aria-hidden="true">
+        <kbd>Ctrl + Alt + M</kbd>
+        <span>按住黑洞拖动 · 松手自动锁定</span>
+      </div>
+      <div class="status">
+        <strong id="overlay-score">0</strong>
+        <span id="overlay-label">负荷平稳</span>
+        <span id="overlay-lens-status" class="lens-status">折射启动中</span>
+      </div>
+    </main>
+    <script src="./backdrop-capture-gate.js?v=10"></script>
+    <script src="./blackhole-renderer.js?v=10"></script>
+    <script src="./overlay.js?v=10"></script>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+/.playwright-cli/
+/output/
+/src-tauri/target/
+/src-tauri/gen/
