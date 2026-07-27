@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Pressure Lens 在本地聚合输入、应用切换和 Agent 上下文，呈现当天的认知负荷。"
+    />
+    <title>Pressure Lens · 本地认知负荷</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <div class="ambient-grid" aria-hidden="true"></div>
+
+    <main class="shell" id="main-content">
+      <!-- 顶部仅保留品牌、隐私状态和一个高频操作，降低视觉噪声。 -->
+      <header class="topbar">
+        <div class="brand" aria-label="Pressure Lens">
+          <span class="brand-mark" aria-hidden="true">
+            <i></i>
+          </span>
+          <span class="brand-copy">
+            <strong>Pressure Lens</strong>
+            <small>local cognitive weather</small>
+          </span>
+        </div>
+
+        <div class="header-actions">
+          <div class="privacy">
+            <span class="privacy-dot" aria-hidden="true"></span>
+            本地运行 · 不记录字符内容
+          </div>
+          <button class="overlay-toggle" id="toggle-overlay" type="button">
+            隐藏桌面黑洞
+          </button>
+        </div>
+      </header>
+
+      <!-- 主视觉与桌面覆盖层共用同一个 WebGL Shader。 -->
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="live-dot" aria-hidden="true"></span>
+            TODAY / LIVE SIGNAL
+          </p>
+          <h1 id="hero-title">
+            看见负荷，
+            <span>在它吞没你之前。</span>
+          </h1>
+          <p class="lede">
+            键盘节奏、应用切换与 Agent 上下文都留在本机，
+            汇成一个可以被理解、也可以被校准的实时信号。
+          </p>
+
+          <div class="score-readout">
+            <div class="score">
+              <span id="score">--</span>
+              <small>/ 100</small>
+            </div>
+            <div class="score-context">
+              <span>当前认知引力</span>
+              <p id="level">正在建立今天的基线</p>
+            </div>
+          </div>
+          <div class="pressure-track" aria-hidden="true">
+            <span></span>
+          </div>
+        </div>
+
+        <figure class="gravity-stage" id="orbit" data-level="calm">
+          <canvas
+            id="dashboard-blackhole"
+            aria-label="根据当前压力实时变化的黑洞"
+          ></canvas>
+          <span class="visual-index" aria-hidden="true">LIVE / 01</span>
+          <figcaption>
+            <span>Schwarzschild field</span>
+            <small id="visual-status">正在初始化引力模型</small>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- 聚合指标采用连续测量带，而不是四张互不关联的通用卡片。 -->
+      <section class="metrics" aria-labelledby="metrics-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">LOCAL TELEMETRY</p>
+            <h2 id="metrics-title">今天的信号切片</h2>
+          </div>
+          <span>仅保留聚合数字</span>
+        </div>
+
+        <div class="metric-grid">
+          <article>
+            <span class="metric-index">01</span>
+            <span class="metric-label">输入强度</span>
+            <strong id="keys">0</strong>
+            <small id="keyboard-status">正在启动键盘采集</small>
+          </article>
+          <article>
+            <span class="metric-index">02</span>
+            <span class="metric-label">删除比例</span>
+            <strong id="backspace">0%</strong>
+            <small>退格次数 / 总输入</small>
+          </article>
+          <article>
+            <span class="metric-index">03</span>
+            <span class="metric-label">Agent 上下文</span>
+            <strong id="context">待机</strong>
+            <small id="agents">Codex 自动采集 · 等待会话</small>
+          </article>
+          <article>
+            <span class="metric-index">04</span>
+            <span class="metric-label">连续活跃</span>
+            <strong id="active">0 分钟</strong>
+            <small id="switches">0 次应用切换</small>
+          </article>
+        </div>
+      </section>
+
+      <section class="insight-grid">
+        <article class="signal-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">WHY THIS SCORE / 01</p>
+              <h2>当前主要信号</h2>
+            </div>
+            <span class="panel-status">实时解释</span>
+          </div>
+          <ul id="reasons">
+            <li>等待第一分钟聚合数据</li>
+          </ul>
+        </article>
+
+        <aside class="calibrate" aria-labelledby="calibrate-title">
+          <p class="eyebrow">HUMAN CALIBRATION / 02</p>
+          <h2 id="calibrate-title">此刻你的真实压力是？</h2>
+          <p class="calibrate-copy">
+            你的感受优先于算法。一次点击就能修正今天的判断。
+          </p>
+          <div class="buttons" id="self-report">
+            <button data-value="1" type="button">轻松</button>
+            <button data-value="2" type="button">平稳</button>
+            <button data-value="3" type="button">紧绷</button>
+            <button data-value="4" type="button">很高</button>
+            <button data-value="5" type="button">过载</button>
+          </div>
+          <small id="report-status">每天几次轻量反馈，会让判断更懂你。</small>
+        </aside>
+      </section>
+
+      <section class="agent-source" aria-labelledby="agent-source-title">
+        <div class="agent-source-copy">
+          <span class="auto-pill">
+            <i aria-hidden="true"></i>
+            AUTO COLLECTOR
+          </span>
+          <div>
+            <strong id="agent-source-title">Agent 会话自动采集</strong>
+            <p>仅读取 token_count 等结构化事件，不保存或展示会话正文。</p>
+          </div>
+        </div>
+        <div class="agent-source-live">
+          <span id="agent-source-status">正在连接 Codex</span>
+          <small id="agent-token-detail">等待第一条上下文指标</small>
+        </div>
+      </section>
+
+      <footer class="local-footer">
+        <span>PRESSURE LENS / WINDOWS MVP</span>
+        <span>SQLite · WebGL2 · Local only</span>
+      </footer>
+    </main>
+
+    <script src="./blackhole-renderer.js?v=10"></script>
+    <script src="./app.js?v=6"></script>
+  </body>
+</html>
