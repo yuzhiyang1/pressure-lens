@@ -43,9 +43,12 @@ jobs:
 
       - name: Process-tree performance gate
         shell: pwsh
+        # GitHub 托管 Windows runner 没有稳定 GPU，WebView2 会退回软件渲染。
+        # 这里硬门禁内存/泄漏并记录 CPU；代表性 Windows 机器由 performance.yml 硬门禁 CPU。
         run: >
           ./scripts/measure-performance.ps1
           -Executable ./src-tauri/target/release/pressure-lens.exe
+          -SkipCpuGate
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -7,6 +7,7 @@ param(
   [double]$MaxPrivateMemoryMb = 450,
   [double]$MaxWorkingSetMb = 700,
   [double]$MaxGrowthMb = 30,
+  [switch]$SkipCpuGate,
   [switch]$KeepRunning
 )
 
@@ -76,6 +77,7 @@ try {
 
   $result = [ordered]@{
     cpuPercent = $cpuPercent
+    cpuGateEnforced = -not $SkipCpuGate
     peakPrivateMemoryMb = $peakPrivate
     peakWorkingSetMb = $peakWorkingSet
     privateMemoryGrowthMb = $growthMb
@@ -94,7 +96,7 @@ try {
   $result | ConvertTo-Json -Depth 4
 
   if (
-    $cpuPercent -gt $MaxCpuPercent -or
+    ((-not $SkipCpuGate) -and $cpuPercent -gt $MaxCpuPercent) -or
     $peakPrivate -gt $MaxPrivateMemoryMb -or
     $peakWorkingSet -gt $MaxWorkingSetMb -or
     $growthMb -gt $MaxGrowthMb

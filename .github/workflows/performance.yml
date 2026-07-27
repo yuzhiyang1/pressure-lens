@@ -1,0 +1,36 @@
+name: Representative Windows performance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance:
+    # 真实 CPU 门禁只能运行在带桌面与硬件加速的代表性 Windows 机器上。
+    runs-on: [self-hosted, windows, x64, gpu]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --release
+
+      - name: Complete process-tree performance gate
+        shell: pwsh
+        run: >
+          ./scripts/measure-performance.ps1
+          -Executable ./src-tauri/target/release/pressure-lens.exe
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: representative-windows-performance
+          path: output/performance-baseline.json
+          if-no-files-found: error
