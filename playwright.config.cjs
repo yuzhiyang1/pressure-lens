@@ -8,6 +8,10 @@ module.exports = defineConfig({
     baseURL: "http://127.0.0.1:4173",
     // Windows 用户与 GitHub Runner 都自带 Chrome，避免额外下载一套浏览器运行时。
     channel: "chrome",
+    launchOptions: {
+      // 无 GPU 的 CI runner 使用 SwiftShader，仍然真实编译并执行 WebGL2 shader。
+      args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+    },
     viewport: { width: 1440, height: 960 },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
