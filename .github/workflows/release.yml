@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+
+      - name: Validate updater signing configuration
+        shell: pwsh
+        env:
+          PRESSURE_LENS_UPDATER_PUBKEY: ${{ vars.PRESSURE_LENS_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:PRESSURE_LENS_UPDATER_PUBKEY) { throw "Missing PRESSURE_LENS_UPDATER_PUBKEY variable" }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "Missing TAURI_SIGNING_PRIVATE_KEY secret" }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { throw "Missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret" }
+          if (-not $env:WINDOWS_CERTIFICATE) { throw "Missing WINDOWS_CERTIFICATE secret" }
+          if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw "Missing WINDOWS_CERTIFICATE_PASSWORD secret" }
+
+      - name: Import trusted Windows code-signing certificate
+        id: codesign
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "pressure-lens-code-signing.pfx"
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item -LiteralPath $certificatePath -Force
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      - name: Generate signed release configuration
+        shell: pwsh
+        env:
+          PRESSURE_LENS_UPDATER_PUBKEY: ${{ vars.PRESSURE_LENS_UPDATER_PUBKEY }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ steps.codesign.outputs.thumbprint }}
+        run: |
+          node ./scripts/prepare-release-config.mjs
+
+      - name: Build NSIS installer and signed updater artifacts
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRESSURE_LENS_UPDATER_PUBKEY: ${{ vars.PRESSURE_LENS_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: src-tauri
+          args: --config tauri.generated.conf.json
+          tagName: v__VERSION__
+          releaseName: Pressure Lens v__VERSION__
+          releaseBody: |
+            Windows installer and cryptographically signed updater artifacts.
+            See README.md and README_EN.md for privacy and performance details.
+          releaseDraft: true
+          prerelease: false

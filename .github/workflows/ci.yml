@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --release
+
+      - name: Windows native smoke
+        shell: pwsh
+        run: >
+          ./scripts/windows-native-smoke.ps1
+          -Executable ./src-tauri/target/release/pressure-lens.exe
+
+      - name: Process-tree performance gate
+        shell: pwsh
+        run: >
+          ./scripts/measure-performance.ps1
+          -Executable ./src-tauri/target/release/pressure-lens.exe
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pressure-lens-ci-evidence
+          path: |
+            output/
+            test-results/
+          if-no-files-found: ignore

@@ -1,4 +1,8 @@
 /.playwright-cli/
 /output/
+/playwright-report/
+/test-results/
+/node_modules/
 /src-tauri/target/
 /src-tauri/gen/
+/src-tauri/tauri.generated.conf.json

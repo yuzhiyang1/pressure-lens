@@ -20,9 +20,25 @@ const labels = {
 };
 
 let targetPressure = 0;
+let targetVisualState = "uncertain";
 let previewBackdropPayload;
 let moveModeEnabled = false;
 let rendererController = null;
+let currentSettings = {
+  performance_mode: "balanced",
+  animation_intensity: 0.65,
+  lens_intensity: 0.55,
+  decorative_shape_tour: false,
+};
+
+function applyRendererSettings(settings) {
+  currentSettings = { ...currentSettings, ...settings };
+  rendererController?.setPolicy(currentSettings.performance_mode, {
+    animationIntensity: currentSettings.animation_intensity,
+    lensIntensity: currentSettings.lens_intensity,
+    decorativeShapeTour: currentSettings.decorative_shape_tour,
+  });
+}
 
 function updateHoverProgress(payload = {}) {
   const progress = Math.max(0, Math.min(1, Number(payload.progress) || 0));
@@ -69,16 +85,12 @@ async function initializeMoveMode() {
   if (listen) {
     await listen("overlay-move-mode", (event) => updateMoveMode(event.payload));
     await listen("overlay-hover-progress", (event) => updateHoverProgress(event.payload));
+    await listen("overlay-visibility", (event) => {
+      rendererController?.setVisible(Boolean(event.payload));
+    });
+    await listen("settings-updated", (event) => applyRendererSettings(event.payload));
+    await listen("snapshot-updated", (event) => renderOverlaySnapshot(event.payload));
   }
-
-  // 全局快捷键不一定由当前 WebView 获得焦点；轻量轮询兜底同步视觉状态。
-  setInterval(async () => {
-    try {
-      updateMoveMode(await invoke("get_overlay_move_mode"));
-    } catch {
-      // 窗口退出期间忽略轮询失败，不影响正常关闭。
-    }
-  }, 350);
 }
 
 lens.addEventListener("pointerdown", async (event) => {
@@ -156,6 +168,8 @@ async function refreshOverlay() {
       0,
       Math.min(1, Number(previewValue) || 0),
     );
+    targetVisualState =
+      targetPressure >= .7 ? "overloaded" : targetPressure >= .4 ? "focused" : "calm";
     document.querySelector("#overlay-score").textContent = Math.round(targetPressure * 100);
     document.querySelector("#overlay-label").textContent =
       targetPressure >= .7
@@ -168,24 +182,46 @@ async function refreshOverlay() {
 
   try {
     const snapshot = await invoke("get_snapshot");
-    targetPressure = snapshot.pressure.score / 100;
-    document.querySelector("#overlay-score").textContent = Math.round(snapshot.pressure.score);
-    document.querySelector("#overlay-label").textContent =
-      labels[snapshot.pressure.level] ?? "建立基线";
+    renderOverlaySnapshot(snapshot);
   } catch {
     document.querySelector("#overlay-label").textContent = "状态暂不可用";
   }
 }
 
+function renderOverlaySnapshot(snapshot) {
+  targetPressure = snapshot.pressure.score / 100;
+  targetVisualState = snapshot.pressure.visual_state ?? "uncertain";
+  document.querySelector("#overlay-score").textContent = Math.round(snapshot.pressure.score);
+  document.querySelector("#overlay-label").textContent = snapshot.sample.collection_paused
+    ? "采集已暂停"
+    : snapshot.quiet_hours_active
+      ? "安静时段"
+      : labels[snapshot.pressure.level] ?? "建立基线";
+  // “暂停全部采集”同样停止桌面截图；悬浮窗只保留最后一帧，不再读取桌面。
+  rendererController?.setPaused(Boolean(
+    snapshot.quiet_hours_active || snapshot.sample.collection_paused,
+  ));
+}
+
+async function initializeSettings() {
+  if (!invoke) {
+    return;
+  }
+  applyRendererSettings(await invoke("get_settings"));
+}
+
 initializeMoveMode().catch(() => updateMoveMode(false));
+initializeSettings().catch(() => {});
 refreshOverlay();
-setInterval(refreshOverlay, 2000);
+// snapshot-updated 是主通道；低频轮询只负责 WebView 休眠恢复后的自愈。
+setInterval(refreshOverlay, 10_000);
 window.PressureBlackHole
   .start(canvas, () => targetPressure, {
-    maximumDpr: 2.5,
-    supersample: 1.75,
-    framesPerSecond: 30,
-    backdropFramesPerSecond: 12,
+    resourceMode: "balanced",
+    animationIntensity: currentSettings.animation_intensity,
+    lensIntensity: currentSettings.lens_intensity,
+    decorativeShapeTour: currentSettings.decorative_shape_tour,
+    readVisualState: () => targetVisualState,
     readBackdrop: invoke
       ? () => invoke("capture_overlay_background")
       : urlParameters.has("backdrop")
@@ -205,10 +241,16 @@ window.PressureBlackHole
     },
     shapeOverride,
   })
-  .then((controller) => {
+  .then(async (controller) => {
     rendererController = controller;
+    if (invoke) {
+      controller.setVisible(await invoke("get_overlay_visible").catch(() => true));
+    }
+    applyRendererSettings(currentSettings);
     lens.classList.add("is-ready");
   })
   .catch((error) => {
     document.querySelector("#overlay-label").textContent = `渲染失败：${error.message}`;
   });
+
+window.addEventListener("beforeunload", () => rendererController?.dispose());

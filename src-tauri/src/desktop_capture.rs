@@ -151,13 +151,21 @@ impl DesktopFrame {
         })
     }
 
-    pub fn into_ipc_payload(self) -> Vec<u8> {
-        // 帧头固定为宽、高两个小端 u32，后面直接拼接 RGBA，避免 JSON/Base64 膨胀。
-        let mut payload = Vec::with_capacity(8 + self.rgba.len());
-        payload.extend_from_slice(&self.width.to_le_bytes());
-        payload.extend_from_slice(&self.height.to_le_bytes());
-        payload.extend_from_slice(&self.rgba);
-        payload
+    pub fn into_jpeg(self, quality: u8) -> Result<Vec<u8>, String> {
+        let mut rgb = Vec::with_capacity(self.width as usize * self.height as usize * 3);
+        for pixel in self.rgba.chunks_exact(4) {
+            rgb.extend_from_slice(&pixel[..3]);
+        }
+        let mut encoded = Vec::with_capacity(self.rgba.len() / 6);
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, quality)
+            .encode(
+                &rgb,
+                self.width,
+                self.height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|error| format!("桌面帧 JPEG 编码失败：{error}"))?;
+        Ok(encoded)
     }
 }
 
@@ -178,22 +186,22 @@ mod tests {
     }
 
     #[test]
-    fn desktop_frame_payload_contains_dimensions_followed_by_rgba_pixels() {
-        let rgba = vec![255, 0, 0, 255, 0, 255, 0, 255];
-        let payload = DesktopFrame::from_rgba(2, 1, rgba.clone())
-            .expect("有效 RGBA 帧应当可以构建")
-            .into_ipc_payload();
-
-        assert_eq!(&payload[0..4], &2_u32.to_le_bytes());
-        assert_eq!(&payload[4..8], &1_u32.to_le_bytes());
-        assert_eq!(&payload[8..], rgba);
-    }
-
-    #[test]
     fn desktop_frame_rejects_a_pixel_buffer_with_the_wrong_length() {
         let result = DesktopFrame::from_rgba(2, 1, vec![0; 4]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn compressed_desktop_frame_is_a_valid_jpeg_payload() {
+        let rgba = vec![80; 8 * 8 * 4];
+        let payload = DesktopFrame::from_rgba(8, 8, rgba)
+            .expect("测试帧有效")
+            .into_jpeg(72)
+            .expect("测试帧可压缩");
+
+        assert_eq!(&payload[0..2], &[0xff, 0xd8]);
+        assert_eq!(&payload[payload.len() - 2..], &[0xff, 0xd9]);
     }
 
     #[test]

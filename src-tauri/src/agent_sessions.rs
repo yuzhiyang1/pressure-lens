@@ -8,7 +8,8 @@ use std::{
 
 use serde_json::Value;
 
-const MAX_SESSION_TAIL_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_SESSION_TAIL_BYTES: u64 = 512 * 1024;
+const INVENTORY_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentObservation {
@@ -23,6 +24,8 @@ pub struct CodexSessionCollector {
     sessions_root: PathBuf,
     active_window: Duration,
     cache: HashMap<PathBuf, CachedTokenUsage>,
+    known_files: Vec<PathBuf>,
+    last_inventory_at: Option<SystemTime>,
 }
 
 struct CachedTokenUsage {
@@ -37,6 +40,8 @@ impl CodexSessionCollector {
             sessions_root: sessions_root.into(),
             active_window,
             cache: HashMap::new(),
+            known_files: Vec::new(),
+            last_inventory_at: None,
         }
     }
 
@@ -49,8 +54,18 @@ impl CodexSessionCollector {
             context_percent: None,
         };
 
+        let should_refresh_inventory = self
+            .last_inventory_at
+            .and_then(|last| now.duration_since(last).ok())
+            .is_none_or(|elapsed| elapsed >= INVENTORY_REFRESH_INTERVAL);
+        if should_refresh_inventory {
+            // 全目录发现降为 30 秒一次；高频轮询只检查已知候选文件的 metadata。
+            self.known_files = find_session_files(&self.sessions_root);
+            self.last_inventory_at = Some(now);
+        }
+
         let mut active_paths = HashSet::new();
-        for session_file in find_session_files(&self.sessions_root) {
+        for session_file in &self.known_files {
             let Ok(metadata) = session_file.metadata() else {
                 continue;
             };
@@ -64,13 +79,13 @@ impl CodexSessionCollector {
 
             active_paths.insert(session_file.clone());
             observation.active_sessions = observation.active_sessions.saturating_add(1);
-            let cached = self.cache.get(&session_file);
+            let cached = self.cache.get(session_file);
             let usage = if cached.is_some_and(|entry| {
                 entry.file_length == metadata.len() && entry.modified_at == modified_at
             }) {
                 cached.and_then(|entry| entry.usage)
             } else {
-                let usage = read_latest_token_usage(&session_file);
+                let usage = read_latest_token_usage(session_file);
                 self.cache.insert(
                     session_file.clone(),
                     CachedTokenUsage {

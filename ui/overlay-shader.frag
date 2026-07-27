@@ -9,8 +9,12 @@ precision highp float;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform float uPressure;
-uniform float uShapePhase;
+uniform int uShapeFrom;
+uniform int uShapeTo;
+uniform float uShapeBlend;
 uniform float uRotationPhase;
+uniform float uLensStrength;
+uniform int uRaySteps;
 uniform sampler2D uBackdrop;
 uniform float uBackdropReady;
 out vec4 fragColor;
@@ -145,15 +149,6 @@ DiskLook mixLook(DiskLook from, DiskLook to, float amount) {
     );
 }
 
-DiskLook currentLook(float shapePhase) {
-    // 相位由渲染器连续累计；每段大部分时间都在渐变，同时保留短暂的造型辨识窗口。
-    float shapeClock = mod(shapePhase, 7.0);
-    int current = int(floor(shapeClock));
-    int next = current == 6 ? 0 : current + 1;
-    float blend = smoothstep(0.35, 1.0, fract(shapeClock));
-    return mixLook(lookAt(current), lookAt(next), blend);
-}
-
 vec2 lissajous(float time) {
     return vec2(
         0.75 * sin(time * 0.37) + 0.25 * sin(time * 0.83 + 1.0),
@@ -165,7 +160,12 @@ void main() {
     vec2 screen = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
     float pressure = clamp(uPressure, 0.0, 1.0);
     float eased = pow(pressure, 0.72);
-    DiskLook look = currentLook(uShapePhase);
+    // 形态由稳定的压力语义驱动；状态变化时只做一次平滑过渡。
+    DiskLook look = mixLook(
+        lookAt(uShapeFrom),
+        lookAt(uShapeTo),
+        smoothstep(0.0, 1.0, uShapeBlend)
+    );
 
     // 低压力也保持可察觉的非重复漂移，高压力扩大范围并叠加快速微摆。
     vec2 wander = mix(
@@ -211,6 +211,9 @@ void main() {
 
     // Schwarzschild 光子测地线的 kick-drift-kick 蛙跳积分。
     for (int index = 0; index < N_STEPS; index++) {
+        if (index >= uRaySteps) {
+            break;
+        }
         float radius2 = dot(point, point);
         if (radius2 < 1.0) {
             captured = true;
@@ -333,7 +336,8 @@ void main() {
     float bendProfile = exp(-abs(impact - B_CRIT) * 0.46);
     float bendStrength = lensWindow
         * bendProfile
-        * mix(0.030, 0.058, eased);
+        * mix(0.030, 0.058, eased)
+        * clamp(uLensStrength, 0.0, 1.0);
     vec2 backdropOffset = vec2(
         radialDirection.x * uResolution.y / uResolution.x,
         -radialDirection.y
