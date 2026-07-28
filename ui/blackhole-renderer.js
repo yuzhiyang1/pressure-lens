@@ -20,6 +20,7 @@
     const lifecycle = {
       visible: options.visible !== false,
       paused: false,
+      refractionPaused: false,
     };
 
     const gl = canvas.getContext("webgl2", {
@@ -226,6 +227,7 @@
       Boolean(captureGate)
       && !disposed
       && pendingBackdrop === null
+      && !lifecycle.refractionPaused
       && window.PressureResources.captureEnabled(resourcePolicy, lifecycle)
       && !captureGate.isSuspended();
 
@@ -303,7 +305,8 @@
       gl.useProgram(program);
       gl.uniform1f(backdropReadyUniform, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      gl.flush();
+      // 拖动是低频交互，这里等待 GPU 清理旧纹理，避免它留在窗口交换链中。
+      gl.finish();
     };
 
     const suspendBackdrop = () => {
@@ -320,7 +323,11 @@
     };
 
     const resumeBackdrop = () => {
-      if (!captureGate || !window.PressureResources.captureEnabled(resourcePolicy, lifecycle)) {
+      if (
+        !captureGate
+        || lifecycle.refractionPaused
+        || !window.PressureResources.captureEnabled(resourcePolicy, lifecycle)
+      ) {
         return;
       }
       captureGate.resume();
@@ -334,6 +341,25 @@
         captureUrgent = false;
         scheduleBackdropCapture(0);
       }
+    };
+
+    const waitForCleanComposite = () => new Promise((resolve) => {
+      // GPU 完成不代表 WebView/DWM 已提交；双 rAF 后留出一次桌面合成宽限。
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.setTimeout(resolve, 80));
+      });
+    });
+
+    const prepareForDrag = async () => {
+      lifecycle.refractionPaused = true;
+      suspendBackdrop();
+      requestRender();
+      await waitForCleanComposite();
+    };
+
+    const resumeAfterDrag = () => {
+      lifecycle.refractionPaused = false;
+      resumeBackdrop();
     };
 
     const requestRender = () => {
@@ -533,7 +559,10 @@
 
     const setPolicy = (mode, intensities = {}) => {
       resourcePolicy = window.PressureResources.resolve(mode, intensities);
-      if (window.PressureResources.captureEnabled(resourcePolicy, lifecycle)) {
+      if (
+        !lifecycle.refractionPaused
+        && window.PressureResources.captureEnabled(resourcePolicy, lifecycle)
+      ) {
         resumeBackdrop();
       } else {
         suspendBackdrop();
@@ -555,8 +584,10 @@
 
     requestRender();
     return Object.freeze({
+      prepareForDrag,
       suspendBackdrop,
       resumeBackdrop,
+      resumeAfterDrag,
       setVisible,
       setPaused,
       setPolicy,
@@ -564,6 +595,8 @@
       getDiagnostics: () => ({
         ...diagnostics,
         animationPhase,
+        backdropSuspended: captureGate?.isSuspended() ?? true,
+        backdropVisibility,
         rotationPhase,
       }),
     });

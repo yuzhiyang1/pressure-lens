@@ -27,8 +27,8 @@
   }
 
   return Object.freeze({
-    // 真实桌面折射暂时关闭，避免拖动窗口时出现桌面采样残影。
-    desktopRefractionEnabled: false,
+    // 正常悬浮启用桌面折射；拖动期间由渲染器生命周期单独暂停。
+    desktopRefractionEnabled: true,
     familyFor,
     motionScale,
     primaryShape,

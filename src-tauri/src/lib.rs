@@ -38,6 +38,8 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt as _;
 use updates::PendingUpdate;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Graphics::Dwm::DwmFlush;
 
 struct AppState {
     monitoring: Arc<MonitoringCore>,
@@ -164,13 +166,31 @@ async fn capture_overlay_background(app: AppHandle) -> Result<Response, String> 
         .map_err(|error| format!("无法读取悬浮窗尺寸：{error}"))?;
     let rect = CaptureRect::new(position.x, position.y, size.width, size.height)?;
 
-    // GDI 复制和 JPEG 压缩都放入阻塞线程；二进制帧不转 Base64，也不会写入磁盘。
-    let payload = tauri::async_runtime::spawn_blocking(move || {
-        // 以低质量损失换取约一个数量级的 IPC 体积下降，避免 WebView 长期保留大块 RGBA 消息。
-        capture(rect).and_then(|frame| frame.into_jpeg(72))
-    })
-    .await
-    .map_err(|error| format!("桌面捕获线程异常：{error}"))??;
+    // 只在内部背景采样的极短窗口排除自身，避免递归镜像；平时仍允许用户截图和录屏。
+    overlay
+        .set_content_protected(true)
+        .map_err(|error| format!("无法隔离悬浮窗采样：{error}"))?;
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // 等待显示属性进入 DWM 合成队列，再读取黑洞下方的桌面。
+        let _ = DwmFlush();
+    }
+
+    let captured = tauri::async_runtime::spawn_blocking(move || capture(rect))
+        .await
+        .map_err(|error| format!("桌面捕获线程异常：{error}"));
+
+    // 无论捕获是否成功，都要立即恢复用户可截图状态。
+    let restore_result = overlay
+        .set_content_protected(false)
+        .map_err(|error| format!("无法恢复悬浮窗截图：{error}"));
+    let frame = captured??;
+    restore_result?;
+
+    // JPEG 压缩放在恢复可截图之后，缩短内容保护的持续时间。
+    let payload = tauri::async_runtime::spawn_blocking(move || frame.into_jpeg(72))
+        .await
+        .map_err(|error| format!("桌面压缩线程异常：{error}"))??;
 
     Ok(Response::new(payload))
 }
