@@ -294,8 +294,7 @@ fn configure_overlay(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     overlay.set_ignore_cursor_events(true)?;
     overlay.set_always_on_top(true)?;
     overlay.set_skip_taskbar(true)?;
-    // 桌面折射已关闭，不再存在递归采样风险；允许截图和录屏保留悬浮黑洞。
-    overlay.set_content_protected(false)?;
+    // 保持 Tauri 默认的非保护状态，让截图和录屏能够保留悬浮黑洞。
 
     if let Some(position) = load_visible_overlay_position(app, &overlay)? {
         overlay.set_position(position)?;
