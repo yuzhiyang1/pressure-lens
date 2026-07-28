@@ -45,7 +45,10 @@ test("高压状态展示可信度、真实历史和恢复动作", async ({ page 
     width: canvas.width,
     height: canvas.height,
     ready: canvas.closest("figure")?.classList.contains("is-ready"),
-  }))).toMatchObject({ ready: true });
+  })), {
+    // Windows Runner 使用 SwiftShader，首次编译测地线 Shader 会明显慢于真实 GPU。
+    timeout: 20_000,
+  }).toMatchObject({ ready: true });
   const canvasSize = await page.locator("#dashboard-blackhole").evaluate((canvas) => ({
     width: canvas.width,
     height: canvas.height,

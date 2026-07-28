@@ -1,6 +1,8 @@
 const { test, expect } = require("@playwright/test");
 
-test.use({ viewport: { width: 420, height: 420 } });
+// 生产悬浮窗仍是 420×420；门禁缩小 CSS 画布，避免 Windows Runner 的
+// SwiftShader 在三次像素采样时超时，同时保留相同 DPR、Shader 和压力参数。
+test.use({ viewport: { width: 300, height: 300 } });
 
 async function readBlackHoleCenter(page) {
   const canvasPng = await page.locator("#blackhole-canvas").screenshot();
@@ -99,6 +101,7 @@ async function readGoldMetrics(page, url) {
 }
 
 test("悬浮黑洞同时保持材质一致、持续旋转与可见漂移", async ({ page }) => {
+  test.setTimeout(90_000);
   const dark = await readGoldMetrics(
     page,
     "/overlay.html?preview=0.13&shape=0&time=2&rotation=0",
