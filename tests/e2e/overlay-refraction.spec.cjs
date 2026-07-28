@@ -36,49 +36,51 @@ test("静止时开启折射，拖动时关闭，落位后只从新位置恢复",
 test("局部折射不会触碰悬浮窗口边界", async ({ page }) => {
   await page.goto("/overlay.html?backdrop=0.78&shape=6&time=2");
   await expect(page.locator("#overlay-lens-status")).toHaveText("桌面折射");
+  await expect.poll(async () => page.evaluate(() => (
+    window.PressureOverlayPreview.controller.getDiagnostics().backdropVisibility
+  )), { timeout: 20_000 }).toBeGreaterThan(0.5);
 
-  const pixels = await page.locator("#blackhole-canvas").evaluate(async (canvas) => {
-    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-    const gl = canvas.getContext("webgl2");
-    const dpr = canvas.width / canvas.clientWidth;
-    const readAlpha = (cssX, cssY) => {
-      const pixel = new Uint8Array(4);
-      gl.readPixels(
-        Math.round(cssX * dpr),
-        Math.round((canvas.clientHeight - cssY) * dpr),
-        1,
-        1,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        pixel,
-      );
-      return pixel[3];
+  // 默认 WebGL 后备缓冲在合成后允许被浏览器清空。读取最终 canvas 截图，
+  // 验证的是用户真正看到的合成像素，也不会依赖 preserveDrawingBuffer。
+  const canvasPng = await page.locator("#blackhole-canvas").screenshot();
+  const pixels = await page.evaluate(async (pngBase64) => {
+    const response = await fetch(`data:image/png;base64,${pngBase64}`);
+    const bitmap = await createImageBitmap(await response.blob());
+    const surface = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = surface.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const rgba = context.getImageData(0, 0, surface.width, surface.height).data;
+    const readBrightness = (x, y) => {
+      const offset = (Math.round(y) * surface.width + Math.round(x)) * 4;
+      return Math.max(rgba[offset], rgba[offset + 1], rgba[offset + 2]);
     };
-    const centerX = canvas.clientWidth / 2;
-    const centerY = canvas.clientHeight / 2;
-    let lensAlpha = 0;
+    const scale = surface.width / 360;
+    const centerX = surface.width / 2;
+    const centerY = surface.height / 2;
+    let lensBrightness = 0;
     // 黑洞中心本来就是透明/纯黑区域；在事件视界外的环带取最大值，
     // 才能稳定验证局部折射确实存在，而不依赖某一种旋转角度。
     for (let radius = 48; radius <= 118; radius += 10) {
       for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
-        lensAlpha = Math.max(
-          lensAlpha,
-          readAlpha(
-            centerX + Math.cos(angle) * radius,
-            centerY + Math.sin(angle) * radius,
+        lensBrightness = Math.max(
+          lensBrightness,
+          readBrightness(
+            centerX + Math.cos(angle) * radius * scale,
+            centerY + Math.sin(angle) * radius * scale,
           ),
         );
       }
     }
 
     return {
-      safeEdgeAlpha: readAlpha(34, canvas.clientHeight / 2),
-      lensAlpha,
+      safeEdgeBrightness: readBrightness(34 * scale, centerY),
+      lensBrightness,
     };
-  });
+  }, canvasPng.toString("base64"));
 
-  expect(pixels.safeEdgeAlpha).toBeLessThan(12);
-  expect(pixels.lensAlpha).toBeGreaterThan(40);
+  expect(pixels.safeEdgeBrightness).toBeLessThan(28);
+  expect(pixels.lensBrightness).toBeGreaterThan(40);
 });
 
 test("稳定低压时状态胶囊退到环境层", async ({ page }) => {
