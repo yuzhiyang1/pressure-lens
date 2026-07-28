@@ -30,12 +30,14 @@ let currentSettings = {
   lens_intensity: 0.55,
   decorative_shape_tour: false,
 };
+// 桌面折射暂时关闭：悬浮层不再截取桌面，因此拖动时不会携带旧位置采样。
+const desktopRefractionEnabled = window.PressureVisuals.desktopRefractionEnabled;
 
 function applyRendererSettings(settings) {
   currentSettings = { ...currentSettings, ...settings };
   rendererController?.setPolicy(currentSettings.performance_mode, {
     animationIntensity: currentSettings.animation_intensity,
-    lensIntensity: currentSettings.lens_intensity,
+    lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
     decorativeShapeTour: currentSettings.decorative_shape_tour,
   });
 }
@@ -103,17 +105,14 @@ lens.addEventListener("pointerdown", async (event) => {
   lensStatus.classList.remove("is-active");
   lens.classList.add("is-dragging");
   try {
-    // 必须等“无桌面纹理”的画面真正提交后再进入原生拖动，否则 DWM 会搬走上一帧采样。
-    await rendererController?.prepareForDrag();
     // 交给系统窗口管理器拖动，跨显示器和 DPI 缩放时比手算坐标更可靠。
     await invoke("start_overlay_dragging");
   } finally {
     // 松手后立即恢复鼠标穿透；再次移动前必须先移出黑洞再重新悬停。
     await invoke("finish_overlay_dragging").catch(() => {});
-    lensStatus.textContent = "重新采样中";
+    lensStatus.textContent = "桌面折射已关闭";
     updateHoverProgress();
     lens.classList.remove("is-dragging");
-    await rendererController?.resumeAfterDrag();
   }
 });
 
@@ -220,14 +219,13 @@ window.PressureBlackHole
   .start(canvas, () => targetPressure, {
     resourceMode: "balanced",
     animationIntensity: currentSettings.animation_intensity,
-    lensIntensity: currentSettings.lens_intensity,
+    lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
     decorativeShapeTour: currentSettings.decorative_shape_tour,
     readVisualState: () => targetVisualState,
-    readBackdrop: invoke
-      ? () => invoke("capture_overlay_background")
-      : urlParameters.has("backdrop")
-        ? async () => createPreviewBackdrop()
-        : undefined,
+    // 真实桌面暂不采样；浏览器仍可用 ?backdrop=0.8 验收折射实验。
+    readBackdrop: !invoke && urlParameters.has("backdrop")
+      ? async () => createPreviewBackdrop()
+      : undefined,
     onBackdropReady: (diagnostics) => {
       lensStatus.textContent = "桌面折射";
       lensStatus.setAttribute(
@@ -244,6 +242,10 @@ window.PressureBlackHole
   })
   .then(async (controller) => {
     rendererController = controller;
+    if (invoke) {
+      lensStatus.textContent = "桌面折射已关闭";
+      lensStatus.classList.remove("is-active");
+    }
     if (invoke) {
       controller.setVisible(await invoke("get_overlay_visible").catch(() => true));
     }

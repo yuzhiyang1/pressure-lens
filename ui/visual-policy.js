@@ -21,8 +21,16 @@
     return familyFor(semanticState)[0];
   }
 
+  function motionScale(reduceMotion) {
+    // 尊重系统偏好，但保留足以表达“活着”的低速运动。
+    return reduceMotion ? 0.18 : 1;
+  }
+
   return Object.freeze({
+    // 真实桌面折射暂时关闭，避免拖动窗口时出现桌面采样残影。
+    desktopRefractionEnabled: false,
     familyFor,
+    motionScale,
     primaryShape,
   });
 });

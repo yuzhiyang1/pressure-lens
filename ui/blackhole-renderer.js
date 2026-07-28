@@ -132,7 +132,6 @@
       captureRequests: 0,
       textureAllocations: 1,
       textureUpdates: 0,
-      dragPresentationBarriers: 0,
     };
     const captureGate = typeof options.readBackdrop === "function"
       ? new window.PressureBackdrop.BackdropCaptureGate()
@@ -304,8 +303,7 @@
       gl.useProgram(program);
       gl.uniform1f(backdropReadyUniform, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      // 拖动是低频交互，这里允许短暂等待 GPU，避免 DWM 拿到尚未完成的旧折射表面。
-      gl.finish();
+      gl.flush();
     };
 
     const suspendBackdrop = () => {
@@ -338,27 +336,6 @@
       }
     };
 
-    const waitForPresentedFrame = () => new Promise((resolve) => {
-      // Promise 在 rAF 回调中 resolve 时，后续微任务仍可能早于本轮 paint。
-      // 双 rAF 后再切到 timer task，调用方拿到控制权时干净画面已经有机会提交给 DWM。
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => window.setTimeout(resolve, 0));
-      });
-    });
-
-    const prepareForDrag = async () => {
-      suspendBackdrop();
-      requestRender();
-      await waitForPresentedFrame();
-      diagnostics.dragPresentationBarriers += 1;
-    };
-
-    const resumeAfterDrag = async () => {
-      // 原生拖动返回后先跨过最终位置的合成周期，再从新坐标发起第一张桌面截图。
-      await waitForPresentedFrame();
-      resumeBackdrop();
-    };
-
     const requestRender = () => {
       if (disposed || !lifecycle.visible || lifecycle.paused || renderRequest !== null) {
         return;
@@ -377,7 +354,9 @@
         ? frameInterval / 1000
         : Math.min((now - previousFrameAt) / 1000, 0.1);
       previousFrameAt = now;
-      animationPhase += elapsedSeconds * resourcePolicy.animationIntensity;
+      // Windows“减少动画”只降低运动幅度，不把黑洞冻结成静态图。
+      const motionScale = window.PressureVisuals.motionScale(reduceMotion);
+      animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
 
       // DPR、帧率和光线步数都由统一资源策略限制，避免视觉参数绕过性能预算。
       const dpr = Math.min(window.devicePixelRatio || 1, resourcePolicy.maximumDpr);
@@ -421,11 +400,12 @@
         shapeTransitionElapsed += elapsedSeconds;
         shapeBlend = reduceMotion ? 1 : Math.min(1, shapeTransitionElapsed / 2);
       }
-      if (!reduceMotion && resourcePolicy.animationIntensity > 0) {
+      if (resourcePolicy.animationIntensity > 0) {
         // 旋转相位独立累计，压力只改变当下速度，不会因 pressure * time 突然跳角度。
         const rotationRate =
           (0.045 + 0.070 * renderedPressure)
-          * resourcePolicy.animationIntensity;
+          * resourcePolicy.animationIntensity
+          * motionScale;
         rotationPhase = (rotationPhase + elapsedSeconds * rotationRate) % (Math.PI * 2);
       }
       gl.clearColor(0, 0, 0, 0);
@@ -511,7 +491,7 @@
         gl.bindTexture(gl.TEXTURE_2D, backdropTexture);
       }
       gl.uniform2f(resolutionUniform, width, height);
-      gl.uniform1f(timeUniform, reduceMotion ? 0 : animationPhase);
+      gl.uniform1f(timeUniform, animationPhase);
       gl.uniform1f(pressureUniform, renderedPressure);
       gl.uniform1i(shapeFromUniform, shapeFrom);
       gl.uniform1i(shapeToUniform, shapeTo);
@@ -577,13 +557,15 @@
     return Object.freeze({
       suspendBackdrop,
       resumeBackdrop,
-      prepareForDrag,
-      resumeAfterDrag,
       setVisible,
       setPaused,
       setPolicy,
       dispose,
-      getDiagnostics: () => ({ ...diagnostics }),
+      getDiagnostics: () => ({
+        ...diagnostics,
+        animationPhase,
+        rotationPhase,
+      }),
     });
   }
 
