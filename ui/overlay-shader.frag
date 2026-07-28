@@ -62,24 +62,26 @@ float diskTexture(
 ) {
     float spiral = radius * wind - time * speed / max(pow(radius, 1.5), 1.0);
     // 角向格点按完整圈数包裹，避免正视形态在 atan 分支处出现水平接缝。
-    float a = noiseWrapY(
-        vec2(radius * 2.6, turns * 21.0 + spiral * 4.0),
-        21.0
+    // 与 Ghostty Blackhole 保持同一组宽纹理频率；过高的 43 圈细层在侧视旋转时
+    // 会压进单个屏幕像素，产生点阵和摩尔纹。
+    float coarse = noiseWrapY(
+        vec2(radius * 1.0, turns * 9.0 + spiral * 1.5 + 7.0),
+        9.0
     );
-    float b = noiseWrapY(
-        vec2(radius * 5.4 + 7.0, turns * 43.0 + spiral * 7.0),
-        43.0
+    float detail = noiseWrapY(
+        vec2(radius * 2.8, turns * 19.0 + spiral * 3.0),
+        19.0
     );
     // 侧视盘会把几十条角向细纹压进一个屏幕像素。继续提高 DPR 只能延后摩尔纹，
     // 这里按投影后的像素足迹逐级收掉不可分辨的细层，保留可见的宽流光。
-    float coarseRate = projectedPixelFootprint * (2.6 + 4.0 * abs(wind));
-    float fineRate = projectedPixelFootprint * (5.4 + 7.0 * abs(wind));
-    float coarseVisibility = 1.0 - smoothstep(0.32, 0.95, coarseRate);
-    float fineVisibility = 1.0 - smoothstep(0.18, 0.62, fineRate);
-    float filteredA = mix(0.5, a, coarseVisibility);
-    float filteredB = mix(filteredA, b, fineVisibility);
+    float coarseRate = projectedPixelFootprint * (1.0 + 1.5 * abs(wind));
+    float detailRate = projectedPixelFootprint * (2.8 + 3.0 * abs(wind));
+    float coarseVisibility = 1.0 - smoothstep(0.48, 1.10, coarseRate);
+    float detailVisibility = 1.0 - smoothstep(0.24, 0.72, detailRate);
+    float filteredCoarse = mix(0.5, coarse, coarseVisibility);
+    float filteredDetail = mix(filteredCoarse, detail, detailVisibility);
     float threads = pow(
-        clamp(filteredA * 0.76 + filteredB * 0.24, 0.0, 1.0),
+        clamp(filteredCoarse * 0.35 + filteredDetail * 0.65, 0.0, 1.0),
         max(contrast, 0.35)
     );
     return 0.24 + 1.55 * threads;
@@ -313,16 +315,24 @@ void main() {
         previousPoint = point;
     }
 
-    // 临界冲量参数附近强化光子环，让边缘更接近原项目的锐亮轮廓。
-    // 光子环至少覆盖数个内部像素，透明桌面合成时不会退化成断续点线。
-    float photonRing = exp(-abs(impact - B_CRIT) * 12.0) * 0.18;
-    vec3 ringColor = mix(
-        vec3(1.0, 0.58, 0.24),
-        vec3(0.72, 0.86, 1.0),
-        look.temperature * 0.42
+    // 透明覆盖层不能依赖“某个像素刚好命中临界半径”。接近临界半径的光线会
+    // 绕行多圈，低能量盘面采样因此容易变成一圈离散棕点；只连续化这部分暗纹，
+    // 高亮盘面仍保留测地线积分产生的真实弧线。
+    float photonPixelWidth = max(fwidth(impact), 0.008);
+    float photonBand = (
+        1.0 - smoothstep(
+            0.0,
+            photonPixelWidth * 3.25,
+            abs(impact - B_CRIT)
+        )
     );
-    emitted += ringColor * photonRing;
-    opacity += photonRing * 0.42;
+    float emissionPeak = max(max(emitted.r, emitted.g), emitted.b);
+    float lowEnergyRing = photonBand
+        * (1.0 - smoothstep(0.65, 2.20, emissionPeak));
+    // Ghostty 本身没有额外绘制一圈光环。这里同样不“补亮”临界环，而是把积分
+    // 预算造成的暗色离散命中压回事件视界；真正明亮的盘面穿越不会被削弱。
+    emitted *= 1.0 - lowEnergyRing;
+    opacity *= 1.0 - lowEnergyRing * 0.86;
 
     if (!captured && opacity < 0.18) {
         vec2 starCell = floor(normalize(velocity).xy * 155.0);
@@ -337,9 +347,15 @@ void main() {
     vec3 color = vec3(1.0) - exp(-emitted * mix(1.24, 1.48, eased));
     float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
     float alpha = clamp(max(opacity, luminance * 1.12), 0.0, 1.0);
-    if (captured) {
-        alpha = max(alpha, 0.985);
-    }
+    // Ghostty 输出整张不透明终端画面；透明 Tauri 窗口需要显式计算事件视界
+    // 的边缘覆盖率，否则 captured 的布尔跳变会直接暴露成锯齿圆周。
+    float horizonPixelWidth = max(fwidth(impact) * 1.35, 0.010);
+    float horizonCoverage = 1.0 - smoothstep(
+        B_CRIT - horizonPixelWidth,
+        B_CRIT + horizonPixelWidth,
+        impact
+    );
+    alpha = max(alpha, horizonCoverage * 0.985);
 
     // 采样悬浮窗下方的真实桌面，并按黑洞中心径向偏移纹理坐标。
     // 屏幕帧只作为这一帧的 GPU 纹理使用，不影响压力计算。

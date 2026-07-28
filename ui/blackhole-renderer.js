@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=14").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=16").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
