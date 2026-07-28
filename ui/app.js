@@ -2,6 +2,7 @@ const invoke = window.__TAURI__?.core?.invoke;
 const listen = window.__TAURI__?.event?.listen;
 const orbit = document.querySelector("#orbit");
 const visualStatus = document.querySelector("#visual-status");
+const settingsPreviewStage = document.querySelector("#settings-preview-stage");
 const shapeParameter = new URLSearchParams(location.search).get("shape");
 const shapeOverride = shapeParameter == null
   ? null
@@ -12,6 +13,8 @@ let dashboardVisualState = "uncertain";
 let currentSettings = null;
 let settingsDirty = false;
 let rendererController = null;
+let settingsRendererController = null;
+let settingsRendererPromise = null;
 let recoveryTimer = null;
 
 const defaultSettings = Object.freeze({
@@ -70,7 +73,8 @@ function confidenceLabel(level) {
 
 function renderReasons(reasons) {
   const list = document.querySelector("#reasons");
-  const values = reasons.length ? reasons : ["当前没有明显的高负荷信号"];
+  // 首屏只保留最有决策价值的三个原因，完整趋势仍由下方遥测与历史承接。
+  const values = (reasons.length ? reasons : ["当前没有明显的高负荷信号"]).slice(0, 3);
   const fragments = values.map((reason) => {
     const item = document.createElement("li");
     item.textContent = reason;
@@ -120,6 +124,7 @@ function render(snapshot) {
   dashboardVisualState = snapshot.pressure.visual_state ?? "uncertain";
   document.documentElement.style.setProperty("--pressure", `${score}%`);
   document.querySelector("#score").textContent = score;
+  document.querySelector("#settings-preview-score").textContent = score;
   document.querySelector("#level").textContent = levelLabel(snapshot.pressure.level, snapshot);
   orbit.dataset.level = snapshot.pressure.level;
   document.querySelector("#keys").textContent = snapshot.sample.keys_per_minute;
@@ -251,6 +256,11 @@ function applySettingsToForm(settings, { force = false } = {}) {
     lensIntensity: 0,
     decorativeShapeTour: settings.decorative_shape_tour,
   });
+  settingsRendererController?.setPolicy(settings.performance_mode, {
+    animationIntensity: settings.animation_intensity,
+    lensIntensity: settings.lens_intensity,
+    decorativeShapeTour: settings.decorative_shape_tour,
+  });
 }
 
 function readSettingsForm() {
@@ -281,12 +291,92 @@ function updateRangeOutputs() {
     `${document.querySelector("#lens-intensity").value}%`;
 }
 
+function updateSettingsPreviewPolicy() {
+  if (!settingsRendererController || !currentSettings) {
+    return;
+  }
+  const settings = readSettingsForm();
+  settingsRendererController.setPolicy(settings.performance_mode, {
+    animationIntensity: settings.animation_intensity,
+    lensIntensity: settings.lens_intensity,
+    decorativeShapeTour: settings.decorative_shape_tour,
+  });
+}
+
+function ensureSettingsPreviewRenderer() {
+  if (settingsRendererPromise) {
+    settingsRendererController?.setVisible(true);
+    return settingsRendererPromise;
+  }
+  settingsRendererPromise = window.PressureBlackHole
+    .start(
+      document.querySelector("#settings-blackhole-preview"),
+      () => dashboardPressure,
+      {
+        // 预览复用同一 Shader 与压力语义，但只在设置页可见时运行，避免增加常驻开销。
+        resourceMode: currentSettings?.performance_mode ?? "balanced",
+        // 设置卡片只负责预览材质与动态，不承担桌面悬浮窗的抗锯齿质量门禁。
+        supersample: 1,
+        animationIntensity: currentSettings?.animation_intensity ?? defaultSettings.animation_intensity,
+        lensIntensity: currentSettings?.lens_intensity ?? defaultSettings.lens_intensity,
+        decorativeShapeTour: currentSettings?.decorative_shape_tour ?? false,
+        readVisualState: () => dashboardVisualState,
+      },
+    )
+    .then((controller) => {
+      settingsRendererController = controller;
+      settingsPreviewStage.classList.add("is-ready");
+      updateSettingsPreviewPolicy();
+      controller.setVisible(
+        !document.hidden && !document.querySelector("#settings-view").hidden,
+      );
+      return controller;
+    })
+    .catch((error) => {
+      document.querySelector("#settings-preview-status").textContent =
+        `预览不可用：${error.message}`;
+      throw error;
+    });
+  return settingsRendererPromise;
+}
+
+function syncRendererVisibility() {
+  const pageVisible = !document.hidden;
+  const dashboardVisible =
+    pageVisible && !document.querySelector("#dashboard-view").hidden;
+  const settingsVisible =
+    pageVisible && !document.querySelector("#settings-view").hidden;
+  rendererController?.setVisible(dashboardVisible);
+  if (settingsVisible) {
+    ensureSettingsPreviewRenderer().catch(() => {});
+  } else {
+    settingsRendererController?.setVisible(false);
+  }
+}
+
 function browserPreviewData() {
   // 浏览器模式只用于端到端和视觉验收；Tauri 始终读取本机真实聚合数据。
   const previewScore = Math.max(
     0,
     Math.min(100, Number(new URLSearchParams(location.search).get("preview")) || 64),
   );
+  const previewReasons = previewScore >= 70
+    ? [
+        "连续活跃 104 分钟，恢复窗口正在变窄",
+        "Agent 上下文达到 71%，切换成本开始上升",
+        "输入节奏高于今天的个人基线",
+      ]
+    : previewScore >= 40
+      ? [
+          "连续活跃时间正在接近今天的高位",
+          "Agent 上下文持续增长，需要留意切换成本",
+          "输入节奏略高于个人基线",
+        ]
+      : [
+          "输入节奏接近今天的个人基线",
+          "应用切换保持在平稳范围",
+          "连续活跃时间尚未触发恢复提醒",
+        ];
   const now = new Date();
   const snapshot = {
     recorded_at: now.toISOString(),
@@ -294,11 +384,7 @@ function browserPreviewData() {
       score: previewScore,
       raw_score: previewScore - 2,
       level: previewScore >= 70 ? "high" : previewScore >= 40 ? "elevated" : "calm",
-      reasons: [
-        "连续活跃 104 分钟，恢复窗口正在变窄",
-        "Agent 上下文达到 71%，切换成本开始上升",
-        "输入节奏高于今天的个人基线",
-      ],
+      reasons: previewReasons,
       confidence: 0.82,
       confidence_level: "high",
       calibration_adjustment: 2,
@@ -412,7 +498,29 @@ document.querySelector(".view-switcher").addEventListener("click", (event) => {
     view.hidden = !active;
     view.classList.toggle("is-active", active);
   });
-  rendererController?.setVisible(button.dataset.view === "dashboard-view");
+  syncRendererVisibility();
+});
+
+// 窗口最小化或被系统隐藏时暂停两个 WebGL 循环，恢复后只启动当前页面的渲染器。
+document.addEventListener("visibilitychange", syncRendererVisibility);
+
+document.querySelector(".preview-background-switcher").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-preview-background]");
+  if (!button) {
+    return;
+  }
+  const background = button.dataset.previewBackground;
+  const labels = {
+    dark: "深色桌面",
+    light: "浅色桌面",
+    complex: "复杂桌面",
+  };
+  settingsPreviewStage.dataset.previewBackground = background;
+  document.querySelectorAll(".preview-background-switcher button").forEach((item) => {
+    item.setAttribute("aria-pressed", String(item === button));
+  });
+  document.querySelector("#settings-preview-status").textContent =
+    `${labels[background]} · 设置会即时反映`;
 });
 
 document.querySelector("#toggle-overlay").addEventListener("click", async () => {
@@ -447,6 +555,7 @@ document.querySelector("#self-report").addEventListener("click", async (event) =
 
 document.querySelector("#settings-form").addEventListener("input", () => {
   updateRangeOutputs();
+  updateSettingsPreviewPolicy();
   settingsDirty = true;
   document.querySelector("#settings-status").textContent = "有未保存的修改";
 });
@@ -586,7 +695,9 @@ window.PressureBlackHole
     document.querySelector("#dashboard-blackhole"),
     () => dashboardPressure,
     {
-      resourceMode: "eco",
+      // 超采样仍受性能档位的 DPR 与光线步数上限约束，避免设置形同虚设。
+      resourceMode: "balanced",
+      supersample: 1.5,
       animationIntensity: defaultSettings.animation_intensity,
       lensIntensity: 0,
       shapeOverride,
@@ -596,6 +707,7 @@ window.PressureBlackHole
   .then((controller) => {
     rendererController = controller;
     orbit.classList.add("is-ready");
+    syncRendererVisibility();
     if (currentSettings) {
       applySettingsToForm(currentSettings);
     }
@@ -607,4 +719,5 @@ window.PressureBlackHole
 window.addEventListener("beforeunload", () => {
   clearInterval(recoveryTimer);
   rendererController?.dispose();
+  settingsRendererController?.dispose();
 });

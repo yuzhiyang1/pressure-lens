@@ -267,6 +267,14 @@ body {
   letter-spacing: .04em;
   pointer-events: none;
   white-space: nowrap;
+  transition:
+    opacity 320ms ease,
+    transform 420ms cubic-bezier(.22, .8, .2, 1);
+}
+
+.status.is-idle {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px) scale(.97);
 }
 
 .status strong {
@@ -295,7 +303,8 @@ body {
 }
 
 .lens-status.is-active {
-  color: rgba(152, 220, 203, .82);
+  /* 正常折射属于默认状态，不占用常驻胶囊；异常和拖动提示仍会显示。 */
+  display: none;
 }
 
 @keyframes gravity-orbit {

@@ -46,13 +46,13 @@ gradients, and relativistic beaming from the MIT-licensed
 
 The black hole always flows, drifts, and rotates, but shapes have stable meaning:
 
-- `calm`: an open, face-on ring;
-- `focused`: a tighter edge-on disk;
+- `calm`: the original inclined Inferno disk;
+- `focused`: a tighter edge-on Gargantua disk;
 - `overloaded`: hotter and wider Quasar/Blazar forms;
-- `uncertain`: Pure Lens when confidence is low or collection is paused.
+- `uncertain`: the stable Inferno anchor when confidence is low or collection is paused.
 
-Transitions are smooth. Decorative shape touring is off by default; when enabled it remains inside
-the current semantic family.
+Transitions are smooth. The six-shape demo is off by default; when explicitly enabled it cycles
+through all six forms, so shape no longer represents pressure alone.
 
 ## Privacy boundaries
 
@@ -62,23 +62,30 @@ the current semantic family.
 - Lensing captures only the 420×420 region under the overlay. It is compressed in memory, never
   written or uploaded, and never enters the pressure model.
 - Capture pauses and clears during drag; late frames from the old position are rejected.
-- The overlay is excluded from Windows capture and feathered on every edge; there is no
-  full-desktop translucent layer.
+- The overlay remains visible in ordinary system screenshots for recording and feedback. Lensing
+  stays inside a locally feathered window; there is no full-desktop translucent layer.
 - Pausing freezes the last reading and lowers confidence instead of pretending pressure is zero.
 
 ## Performance
 
-Performance is a release gate. Balanced mode is capped at 20 FPS, 1 FPS lens capture, 1.35 DPR,
-and 40 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture.
+Performance is a release gate. Balanced mode is capped at 15 FPS, 1 FPS lens capture, 2 DPR, and
+52 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture. Only vivid mode
+raises the limits to 30 FPS, 2.5 DPR, and 56 steps.
 
 Validated full-process-tree results (Rust, two WebViews, and GPU):
 
 | Metric | v0.2.0 observed | CI gate |
 | --- | ---: | ---: |
 | Normalized CPU | 1.11–2.64% | ≤ 3% |
+| GPU (default pressure-driven mode) | 9.98% average, 12.97% peak | representative machine manual gate ≤ 20% |
+| GPU (six-shape tour) | 11.71% average, 15.20% peak | representative machine manual gate ≤ 20% |
 | Peak private memory | 340.38–351.06 MB | ≤ 450 MB |
 | Peak working set | 585.92–602.24 MB | ≤ 700 MB |
 | 30-second private-memory change | -4.05–1.13 MB | growth ≤ 30 MB |
+
+An additional Release run with the current visual policy on 2026-07-28 measured 1.04% CPU,
+384.91 MB peak private memory, 625.59 MB peak working set, and -6.12 MB private-memory change over
+30 seconds, passing every gate.
 
 The earlier raw-frame implementation reached about 3.33 GB of private memory. v0.2.0 uses
 compressed frame IPC, a fixed buffer, explicit `ImageBitmap.close()`, in-place texture updates, and

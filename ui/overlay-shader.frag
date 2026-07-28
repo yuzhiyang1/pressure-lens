@@ -56,7 +56,8 @@ float diskTexture(
     float time,
     float speed,
     float wind,
-    float contrast
+    float contrast,
+    float projectedPixelFootprint
 ) {
     float spiral = radius * wind - time * speed / max(pow(radius, 1.5), 1.0);
     // 角向格点按完整圈数包裹，避免正视形态在 atan 分支处出现水平接缝。
@@ -68,8 +69,16 @@ float diskTexture(
         vec2(radius * 5.4 + 7.0, turns * 43.0 + spiral * 7.0),
         43.0
     );
+    // 侧视盘会把几十条角向细纹压进一个屏幕像素。继续提高 DPR 只能延后摩尔纹，
+    // 这里按投影后的像素足迹逐级收掉不可分辨的细层，保留可见的宽流光。
+    float coarseRate = projectedPixelFootprint * (2.6 + 4.0 * abs(wind));
+    float fineRate = projectedPixelFootprint * (5.4 + 7.0 * abs(wind));
+    float coarseVisibility = 1.0 - smoothstep(0.32, 0.95, coarseRate);
+    float fineVisibility = 1.0 - smoothstep(0.18, 0.62, fineRate);
+    float filteredA = mix(0.5, a, coarseVisibility);
+    float filteredB = mix(filteredA, b, fineVisibility);
     float threads = pow(
-        clamp(a * 0.68 + b * 0.32, 0.0, 1.0),
+        clamp(filteredA * 0.76 + filteredB * 0.24, 0.0, 1.0),
         max(contrast, 0.35)
     );
     return 0.24 + 1.55 * threads;
@@ -167,21 +176,22 @@ void main() {
         smoothstep(0.0, 1.0, uShapeBlend)
     );
 
-    // 低压力也保持可察觉的非重复漂移，高压力扩大范围并叠加快速微摆。
+    // 低压力只保留 1–3px 呼吸，高压力也限制在约 10px，避免常驻窗口抢注意力。
     vec2 wander = mix(
         lissajous(uTime * 0.55),
         lissajous(uTime * 1.15),
         eased
     );
-    vec2 drift = wander * mix(0.014, 0.046, eased);
+    vec2 drift = wander * mix(0.004, 0.019, eased);
     drift += vec2(cos(uTime * 0.80), sin(uTime * 1.00))
-        * mix(0.004, 0.014, eased);
+        * mix(0.001, 0.005, eased);
     float roll = look.roll
         + uRotationPhase
         + 0.04 * sin(uTime * 0.047)
         + 0.015 * sin(uTime * 0.13 + 1.3);
     vec2 position = rotate2(roll) * (screen - drift);
-    float shadowRadius = mix(0.082, 0.174, eased);
+    // 高压以盘面温度和宽度表达，不再把视觉面积放大到接近窗口边缘。
+    float shadowRadius = mix(0.082, 0.130, eased);
     float worldScale = B_CRIT / shadowRadius;
     vec2 rayPlane = position * worldScale;
     float impact = length(rayPlane);
@@ -200,6 +210,9 @@ void main() {
     float inclination = look.inclination;
     float cosineInclination = cos(inclination);
     float sineInclination = sin(inclination);
+    float projectedPixelFootprint =
+        (worldScale / uResolution.y)
+        / max(abs(cosineInclination), 0.32);
     vec3 diskNormal = vec3(0.0, sineInclination, cosineInclination);
     vec3 diskAxisY = vec3(0.0, cosineInclination, -sineInclination);
     vec3 emitted = vec3(0.0);
@@ -258,7 +271,8 @@ void main() {
                     uTime * localTime * mix(0.42, 0.18, eased),
                     look.speed,
                     look.wind,
-                    look.contrast
+                    look.contrast,
+                    projectedPixelFootprint
                 );
                 float thermal = pow(diskInner / diskRadius, 0.58);
                 vec3 color = thermalColor(thermal, look.temperature);
@@ -292,7 +306,8 @@ void main() {
     }
 
     // 临界冲量参数附近强化光子环，让边缘更接近原项目的锐亮轮廓。
-    float photonRing = exp(-abs(impact - B_CRIT) * 17.0) * 0.18;
+    // 光子环至少覆盖数个内部像素，透明桌面合成时不会退化成断续点线。
+    float photonRing = exp(-abs(impact - B_CRIT) * 12.0) * 0.18;
     vec3 ringColor = mix(
         vec3(1.0, 0.58, 0.24),
         vec3(0.72, 0.86, 1.0),
@@ -328,13 +343,19 @@ void main() {
     vec2 radialDirection = length(lensPosition) > 0.0001
         ? normalize(lensPosition)
         : vec2(0.0);
-    float lensWindow = 1.0 - smoothstep(
-        B_CRIT * 0.90,
-        traceLimit * 0.96,
-        impact
+    // 折射只覆盖事件视界附近的局部圆域，避免 420px 透明窗口的物理边界露出来。
+    float lensRadius = length(lensPosition);
+    float localLensOuter = min(
+        max(shadowRadius * 2.20, 0.22),
+        0.34
+    );
+    float localLensWindow = 1.0 - smoothstep(
+        shadowRadius * 0.86,
+        localLensOuter,
+        lensRadius
     );
     float bendProfile = exp(-abs(impact - B_CRIT) * 0.46);
-    float bendStrength = lensWindow
+    float bendStrength = localLensWindow
         * bendProfile
         * mix(0.030, 0.058, eased)
         * clamp(uLensStrength, 0.0, 1.0);
@@ -346,6 +367,18 @@ void main() {
         uBackdrop,
         clamp(backdropUv + backdropOffset, vec2(0.002), vec2(0.998))
     ).rgb;
+    float backdropLuminance = dot(
+        backdrop,
+        vec3(0.2126, 0.7152, 0.0722)
+    );
+    float lightBackdrop = uBackdropReady
+        * smoothstep(0.58, 0.88, backdropLuminance);
+    // 浅色桌面降低盘面白度并增加暖色密度，同一形态不会被背景洗成半透明白雾。
+    vec3 adaptiveForeground = mix(
+        color,
+        color * 0.56 + vec3(0.12, 0.038, 0.008),
+        lightBackdrop * 0.72
+    );
 
     // WebView 本身仍是 420×420 的透明窗口。让所有图层在四条物理边界前羽化，
     // 避免宽盘或高压力折射触及窗口边缘时露出一条笔直的截图接缝。
@@ -355,16 +388,23 @@ void main() {
         min(edgeUv.y, 1.0 - edgeUv.y)
     );
     float edgeFeather = smoothstep(0.012, 0.105, edgeDistance);
-    float foregroundAlpha = alpha * edgeFeather;
+    float foregroundAlpha = clamp(
+        alpha * edgeFeather * mix(1.0, 1.22, lightBackdrop),
+        0.0,
+        1.0
+    );
 
     // 将折射桌面作为黑洞与吸积盘背后的图层；径向与四边同时渐隐。
-    float backdropAlpha = uBackdropReady * lensWindow * edgeFeather * 0.985;
+    float backdropAlpha = uBackdropReady
+        * localLensWindow
+        * edgeFeather
+        * 0.985;
     float finalAlpha = foregroundAlpha + backdropAlpha * (1.0 - foregroundAlpha);
     if (finalAlpha < 0.006) {
         discard;
     }
     vec3 finalColor = (
-        color * foregroundAlpha
+        adaptiveForeground * foregroundAlpha
         + backdrop * backdropAlpha * (1.0 - foregroundAlpha)
     ) / max(finalAlpha, 0.0001);
 

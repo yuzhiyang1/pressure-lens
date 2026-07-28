@@ -1,6 +1,10 @@
 const { test, expect } = require("@playwright/test");
 
-test("悬浮时开启折射，拖动时关闭，松手后从新位置恢复", async ({ page }) => {
+// CI 使用 SwiftShader 软件渲染，小视口仍能验证真实 WebGL2 折射生命周期，
+// 同时避免高分辨率光线积分阻塞浏览器主线程。
+test.use({ viewport: { width: 360, height: 360 } });
+
+test("静止时开启折射，拖动时关闭，落位后只从新位置恢复", async ({ page }) => {
   await page.goto("/overlay.html?backdrop=0.2");
   await expect(page.locator("#overlay-lens-status")).toHaveText("桌面折射");
 
@@ -14,7 +18,7 @@ test("悬浮时开启折射，拖动时关闭，松手后从新位置恢复", as
     await controller.prepareForDrag();
     const dragging = controller.getDiagnostics();
     await controller.resumeAfterDrag();
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await new Promise((resolve) => setTimeout(resolve, 260));
     const restored = controller.getDiagnostics();
 
     return { before, dragging, restored };
@@ -27,4 +31,64 @@ test("悬浮时开启折射，拖动时关闭，松手后从新位置恢复", as
   expect(states.restored.captureRequests).toBeGreaterThan(
     states.dragging.captureRequests,
   );
+});
+
+test("局部折射不会触碰悬浮窗口边界", async ({ page }) => {
+  await page.goto("/overlay.html?backdrop=0.78&shape=6&time=2");
+  await expect(page.locator("#overlay-lens-status")).toHaveText("桌面折射");
+  await expect.poll(async () => page.evaluate(() => (
+    window.PressureOverlayPreview.controller.getDiagnostics().backdropVisibility
+  )), { timeout: 20_000 }).toBeGreaterThan(0.5);
+
+  // 默认 WebGL 后备缓冲在合成后允许被浏览器清空。读取最终 canvas 截图，
+  // 验证的是用户真正看到的合成像素，也不会依赖 preserveDrawingBuffer。
+  const canvasPng = await page.locator("#blackhole-canvas").screenshot();
+  const pixels = await page.evaluate(async (pngBase64) => {
+    const response = await fetch(`data:image/png;base64,${pngBase64}`);
+    const bitmap = await createImageBitmap(await response.blob());
+    const surface = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = surface.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const rgba = context.getImageData(0, 0, surface.width, surface.height).data;
+    const readBrightness = (x, y) => {
+      const offset = (Math.round(y) * surface.width + Math.round(x)) * 4;
+      return Math.max(rgba[offset], rgba[offset + 1], rgba[offset + 2]);
+    };
+    const scale = surface.width / 360;
+    const centerX = surface.width / 2;
+    const centerY = surface.height / 2;
+    let lensBrightness = 0;
+    // 黑洞中心本来就是透明/纯黑区域；在事件视界外的环带取最大值，
+    // 才能稳定验证局部折射确实存在，而不依赖某一种旋转角度。
+    for (let radius = 48; radius <= 118; radius += 10) {
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
+        lensBrightness = Math.max(
+          lensBrightness,
+          readBrightness(
+            centerX + Math.cos(angle) * radius * scale,
+            centerY + Math.sin(angle) * radius * scale,
+          ),
+        );
+      }
+    }
+
+    return {
+      safeEdgeBrightness: readBrightness(34 * scale, centerY),
+      lensBrightness,
+    };
+  }, canvasPng.toString("base64"));
+
+  expect(pixels.safeEdgeBrightness).toBeLessThan(28);
+  expect(pixels.lensBrightness).toBeGreaterThan(40);
+});
+
+test("稳定低压时状态胶囊退到环境层", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/overlay.html?preview=0.13");
+
+  const status = page.locator(".status");
+  await expect(status).not.toHaveClass(/is-idle/);
+  await page.clock.fastForward(4_100);
+  await expect(status).toHaveClass(/is-idle/);
 });
