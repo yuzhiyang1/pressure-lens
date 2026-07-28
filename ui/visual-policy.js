@@ -27,8 +27,8 @@
   }
 
   return Object.freeze({
-    // 正常悬浮启用桌面折射；拖动期间由渲染器生命周期单独暂停。
-    desktopRefractionEnabled: true,
+    // 保持第一版黑洞本体的完整流光，不叠加会压暗盘面的桌面折射蒙层。
+    desktopRefractionEnabled: false,
     familyFor,
     motionScale,
     primaryShape,

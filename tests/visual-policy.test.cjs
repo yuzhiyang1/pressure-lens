@@ -12,8 +12,8 @@ test("高压力仍保留更热、更宽的形态族", () => {
   assert.deepEqual(visualPolicy.familyFor("overloaded"), [4, 5, 0]);
 });
 
-test("正常悬浮默认启用桌面折射", () => {
-  assert.equal(visualPolicy.desktopRefractionEnabled, true);
+test("默认视觉保持原版流光，不叠加桌面折射蒙层", () => {
+  assert.equal(visualPolicy.desktopRefractionEnabled, false);
 });
 
 test("减少动画只降低速度，不把黑洞冻结", () => {

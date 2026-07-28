@@ -105,17 +105,14 @@ lens.addEventListener("pointerdown", async (event) => {
   lensStatus.classList.remove("is-active");
   lens.classList.add("is-dragging");
   try {
-    // 等旧位置的折射纹理从桌面合成器中清除后，只拖动黑洞本体。
-    await rendererController?.prepareForDrag();
     // 交给系统窗口管理器拖动，跨显示器和 DPI 缩放时比手算坐标更可靠。
     await invoke("start_overlay_dragging");
   } finally {
     // 松手后立即恢复鼠标穿透；再次移动前必须先移出黑洞再重新悬停。
     await invoke("finish_overlay_dragging").catch(() => {});
-    lensStatus.textContent = "重新采样中";
+    lensStatus.textContent = "原版流光";
     updateHoverProgress();
     lens.classList.remove("is-dragging");
-    rendererController?.resumeAfterDrag();
   }
 });
 
@@ -225,11 +222,10 @@ window.PressureBlackHole
     lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
     decorativeShapeTour: currentSettings.decorative_shape_tour,
     readVisualState: () => targetVisualState,
-    readBackdrop: invoke
-      ? () => invoke("capture_overlay_background")
-      : urlParameters.has("backdrop")
-        ? async () => createPreviewBackdrop()
-        : undefined,
+    // 浏览器仍可显式预览折射实验；桌面端保持原版纯黑洞视觉。
+    readBackdrop: !invoke && urlParameters.has("backdrop")
+      ? async () => createPreviewBackdrop()
+      : undefined,
     onBackdropReady: (diagnostics) => {
       lensStatus.textContent = "桌面折射";
       lensStatus.setAttribute(
@@ -246,9 +242,9 @@ window.PressureBlackHole
   })
   .then(async (controller) => {
     rendererController = controller;
-    // 浏览器验收复用页面上唯一的真实 WebGL 渲染器，避免重复编译 Shader。
-    if (!invoke) {
-      window.PressureOverlayPreview = Object.freeze({ controller });
+    if (invoke) {
+      lensStatus.textContent = "原版流光";
+      lensStatus.classList.remove("is-active");
     }
     if (invoke) {
       controller.setVisible(await invoke("get_overlay_visible").catch(() => true));
