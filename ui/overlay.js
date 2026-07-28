@@ -36,7 +36,7 @@ let currentSettings = {
   performance_mode: "balanced",
   animation_intensity: 0.65,
   lens_intensity: 0.55,
-  decorative_shape_tour: true,
+  decorative_shape_tour: false,
 };
 // 桌面折射暂时关闭：悬浮层不再截取桌面，因此拖动时不会携带旧位置采样。
 const desktopRefractionEnabled = window.PressureVisuals.desktopRefractionEnabled;

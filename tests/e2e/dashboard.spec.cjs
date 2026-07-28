@@ -18,9 +18,21 @@ test("高压状态展示可信度、真实历史和恢复动作", async ({ page 
   const canvasSize = await page.locator("#dashboard-blackhole").evaluate((canvas) => ({
     width: canvas.width,
     height: canvas.height,
+    dpr: canvas.width / canvas.clientWidth,
+    raySteps: Number(canvas.dataset.raySteps),
+    framesPerSecond: Number(canvas.dataset.framesPerSecond),
+    tourEnabled: canvas.dataset.tourEnabled,
+    shapeTo: Number(canvas.dataset.shapeTo),
   }));
   expect(canvasSize.width).toBeGreaterThan(0);
   expect(canvasSize.height).toBeGreaterThan(0);
+  expect(canvasSize.dpr).toBeCloseTo(1.5, 2);
+  expect(canvasSize).toMatchObject({
+    raySteps: 56,
+    framesPerSecond: 15,
+    tourEnabled: "false",
+    shapeTo: 4,
+  });
 });
 
 test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
@@ -35,5 +47,5 @@ test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
   await expect(page.locator("#settings-status")).toHaveText("预览设置已生效");
   await expect(page.getByRole("checkbox", { name: /键盘节奏/ })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: /Agent Provider/ })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: /装饰形态巡游/ })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /演示六种形态/ })).not.toBeChecked();
 });

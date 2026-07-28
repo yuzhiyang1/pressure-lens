@@ -35,6 +35,10 @@ On the representative Windows machine it measured 11.71% average GPU and 15.20% 
 a 30-second multi-shape interval. The manual representative-machine ceiling is 20%; hosted CI
 cannot enforce this signal because it has no stable hardware-backed desktop.
 
+The default pressure-driven mode keeps a stable low-pressure shape instead of touring continuously.
+With both the dashboard and desktop overlay visible, it measured 9.98% average GPU, 12.97% peak GPU,
+1.34% normalized CPU, and 337.5 MB private memory over 30 seconds.
+
 The committed values are upper safety limits, not targets. Eco and balanced modes should normally
 sit below them. A release may tighten the thresholds after a representative hardware sample. Hosted
 CI's software-rendering CPU number must never be used to relax the physical-machine CPU budget.

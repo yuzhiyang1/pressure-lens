@@ -443,7 +443,6 @@ h1 span {
   width: 114%;
   height: 106%;
   opacity: 0;
-  filter: saturate(.94) contrast(1.04);
   transform: translateX(18px) scale(.97);
   transition:
     opacity 1000ms ease,

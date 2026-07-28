@@ -24,7 +24,7 @@ test("平衡档遵守常驻渲染预算", () => {
   assert.ok(policy.maximumDpr <= 1.5);
   assert.ok(policy.raySteps <= 40);
   assert.ok(policy.backdropFramesPerSecond <= 4);
-  assert.equal(policy.decorativeShapeTour, true);
+  assert.equal(policy.decorativeShapeTour, false);
 });
 
 test("暂停或隐藏时不允许继续桌面捕获", () => {

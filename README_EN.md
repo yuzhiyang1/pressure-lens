@@ -46,13 +46,13 @@ gradients, and relativistic beaming from the MIT-licensed
 
 The black hole always flows, drifts, and rotates, but shapes have stable meaning:
 
-- `calm`: an open, face-on ring;
-- `focused`: a tighter edge-on disk;
+- `calm`: the original inclined Inferno disk;
+- `focused`: a tighter edge-on Gargantua disk;
 - `overloaded`: hotter and wider Quasar/Blazar forms;
-- `uncertain`: Pure Lens when confidence is low or collection is paused.
+- `uncertain`: the stable Inferno anchor when confidence is low or collection is paused.
 
-Transitions are smooth. Decorative shape touring is off by default; when enabled it remains inside
-the current semantic family.
+Transitions are smooth. The six-shape demo is off by default; when explicitly enabled it cycles
+through all six forms, so shape no longer represents pressure alone.
 
 ## Privacy boundaries
 
@@ -76,6 +76,7 @@ Validated full-process-tree results (Rust, two WebViews, and GPU):
 | Metric | v0.2.0 observed | CI gate |
 | --- | ---: | ---: |
 | Normalized CPU | 1.11–2.64% | ≤ 3% |
+| GPU (default pressure-driven mode) | 9.98% average, 12.97% peak | representative machine manual gate ≤ 20% |
 | GPU (six-shape tour) | 11.71% average, 15.20% peak | representative machine manual gate ≤ 20% |
 | Peak private memory | 340.38–351.06 MB | ≤ 450 MB |
 | Peak working set | 585.92–602.24 MB | ≤ 700 MB |

@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
-test("桌面黑洞恢复第一版的超采样与完整光线步数", async ({ page }) => {
-  await page.goto("/overlay.html?preview=0.08");
+test("13 分桌面黑洞保持低压形态并使用高质量渲染", async ({ page }) => {
+  await page.goto("/overlay.html?preview=0.13");
 
   await expect.poll(async () => (
     page.locator("#blackhole-canvas").evaluate((canvas) => ({
@@ -10,12 +10,28 @@ test("桌面黑洞恢复第一版的超采样与完整光线步数", async ({ pa
       framesPerSecond: Number(canvas.dataset.framesPerSecond),
       tourEnabled: canvas.dataset.tourEnabled,
       tourSize: Number(canvas.dataset.tourSize),
+      shapeTo: Number(canvas.dataset.shapeTo),
     }))
   )).toEqual({
     dpr: 1.75,
     raySteps: 56,
     framesPerSecond: 15,
-    tourEnabled: "true",
-    tourSize: 6,
+    tourEnabled: "false",
+    tourSize: 2,
+    shapeTo: 0,
+  });
+});
+
+test("压力升到 78 分后切换为与仪表盘一致的过载形态", async ({ page }) => {
+  await page.goto("/overlay.html?preview=0.78");
+
+  await expect.poll(async () => (
+    page.locator("#blackhole-canvas").evaluate((canvas) => ({
+      shapeTo: Number(canvas.dataset.shapeTo),
+      tourEnabled: canvas.dataset.tourEnabled,
+    }))
+  )).toEqual({
+    shapeTo: 4,
+    tourEnabled: "false",
   });
 });

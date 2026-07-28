@@ -30,8 +30,8 @@
       ...tier,
       animationIntensity: clamp(intensities.animationIntensity ?? 0.75, 0, 1),
       lensIntensity: clamp(intensities.lensIntensity ?? 0.65, 0, 1),
-      // 默认开启 Ghostty 风格巡游；用户仍可在设置页关闭并回到稳定语义形态。
-      decorativeShapeTour: Boolean(intensities.decorativeShapeTour ?? true),
+      // 默认由压力区间决定形态；巡游仅作为用户主动开启的视觉演示。
+      decorativeShapeTour: Boolean(intensities.decorativeShapeTour ?? false),
     });
   }
 

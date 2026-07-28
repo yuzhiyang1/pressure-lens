@@ -82,7 +82,7 @@ impl Default for AppSettings {
             quiet_hours: QuietHours::default(),
             retention_days: 30,
             launch_at_startup: false,
-            decorative_shape_tour: true,
+            decorative_shape_tour: false,
         }
     }
 }
@@ -188,6 +188,6 @@ mod tests {
         assert!(settings.collection_paused);
         assert!(settings.collect_keyboard);
         assert_eq!(settings.retention_days, 30);
-        assert!(settings.decorative_shape_tour);
+        assert!(!settings.decorative_shape_tour);
     }
 }

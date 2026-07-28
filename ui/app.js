@@ -30,7 +30,7 @@ const defaultSettings = Object.freeze({
   },
   retention_days: 30,
   launch_at_startup: false,
-  decorative_shape_tour: true,
+  decorative_shape_tour: false,
 });
 
 function formatTokens(value) {
@@ -586,7 +586,11 @@ window.PressureBlackHole
     document.querySelector("#dashboard-blackhole"),
     () => dashboardPressure,
     {
-      resourceMode: "eco",
+      // 与悬浮层共享平衡档和完整光线积分，避免同一压力显示成两种材质。
+      resourceMode: "balanced",
+      supersample: 1.5,
+      maximumDpr: 1.5,
+      minimumRaySteps: 56,
       animationIntensity: defaultSettings.animation_intensity,
       lensIntensity: 0,
       shapeOverride,
