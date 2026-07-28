@@ -1,8 +1,9 @@
 const { test, expect } = require("@playwright/test");
 
 test.beforeEach(async ({ page }) => {
-  // GitHub Runner 通过 SwiftShader 软件渲染，缩小画布可避免高质量 shader 阻塞测试线程。
-  await page.setViewportSize({ width: 360, height: 240 });
+  // 这里只验证真实 Shader、DPR、积分步数与形态语义，不做像素级视觉比较。
+  // 小画布让 GitHub Runner 的 SwiftShader 也能在门禁时间内完成第一帧。
+  await page.setViewportSize({ width: 240, height: 180 });
 });
 
 test("13 分桌面黑洞保持低压形态并使用平衡档渲染预算", async ({ page }) => {
@@ -17,7 +18,7 @@ test("13 分桌面黑洞保持低压形态并使用平衡档渲染预算", async
       tourSize: Number(canvas.dataset.tourSize),
       shapeTo: Number(canvas.dataset.shapeTo),
     }))
-  )).toEqual({
+  ), { timeout: 20_000 }).toEqual({
     dpr: 1.75,
     raySteps: 52,
     framesPerSecond: 15,

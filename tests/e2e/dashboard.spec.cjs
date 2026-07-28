@@ -1,5 +1,30 @@
 const { test, expect } = require("@playwright/test");
 
+// 与 Tauri 主窗口保持同尺寸；首屏断言因此直接代表真实 Windows 布局。
+test.use({ viewport: { width: 1180, height: 820 } });
+
+async function installLightweightRenderer(page) {
+  // 表单、文案与字号测试不验证 WebGL。使用同控制器接口的轻量桩，
+  // 避免 CI 的 SwiftShader 把无关测试耗时放大到 30 秒以上。
+  await page.route("**/blackhole-renderer.js*", (route) => route.fulfill({
+    contentType: "application/javascript",
+    body: `
+      window.PressureBlackHole = Object.freeze({
+        start: async (canvas) => {
+          canvas.width = 1;
+          canvas.height = 1;
+          return Object.freeze({
+            setVisible() {},
+            setPaused() {},
+            setPolicy() {},
+            dispose() {},
+          });
+        },
+      });
+    `,
+  }));
+}
+
 test("高压状态展示可信度、真实历史和恢复动作", async ({ page }) => {
   await page.goto("/index.html?preview=78");
 
@@ -13,7 +38,7 @@ test("高压状态展示可信度、真实历史和恢复动作", async ({ page 
   await expect(page.locator("#advice-title")).toHaveText("离开屏幕五分钟");
   const adviceBox = await page.locator("#advice-panel").boundingBox();
   expect(adviceBox).not.toBeNull();
-  expect(adviceBox.y + adviceBox.height).toBeLessThanOrEqual(960);
+  expect(adviceBox.y + adviceBox.height).toBeLessThanOrEqual(820);
 
   // 真实浏览器必须完成 WebGL2 Shader 编译并生成非零帧缓冲。
   await expect.poll(async () => page.locator("#dashboard-blackhole").evaluate((canvas) => ({
@@ -42,6 +67,7 @@ test("高压状态展示可信度、真实历史和恢复动作", async ({ page 
 });
 
 test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
+  await installLightweightRenderer(page);
   await page.goto("/index.html?preview=55");
   await page.getByRole("button", { name: "设置" }).click();
 
@@ -81,6 +107,7 @@ test("设置页可在三种桌面背景实时预览黑洞", async ({ page }) => 
 });
 
 test("关键辅助信息保持至少 12 像素的可读字号", async ({ page }) => {
+  await installLightweightRenderer(page);
   await page.goto("/index.html?preview=55");
   const dashboardHelpers = page.locator(
     ".metric-grid small, #calibration-detail, .health-list li, .summary-grid span, .agent-source-copy p",
@@ -101,6 +128,7 @@ test("关键辅助信息保持至少 12 像素的可读字号", async ({ page })
 });
 
 test("低压预览不会沿用高压原因文案", async ({ page }) => {
+  await installLightweightRenderer(page);
   await page.goto("/index.html?preview=13");
 
   await expect(page.locator("#score")).toHaveText("13");
