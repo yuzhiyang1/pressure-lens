@@ -358,12 +358,17 @@
       const motionScale = window.PressureVisuals.motionScale(reduceMotion);
       animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
 
-      // DPR、帧率和光线步数都由统一资源策略限制，避免视觉参数绕过性能预算。
-      // 桌面悬浮层可要求最低超采样倍率，旋转时的细密流光不会退化成摩尔纹。
-      const minimumDpr = clamp(Number(options.minimumDpr) || 1, 1, 2);
+      // 仪表盘沿用资源策略；桌面悬浮层可恢复第一版的独立超采样。
+      // 这样只增加 420×420 覆盖层的 GPU 清晰度，不提高后台采集频率和主界面开销。
+      const supersample = clamp(Number(options.supersample) || 1, 1, 2);
+      const maximumDpr = clamp(
+        Number(options.maximumDpr) || resourcePolicy.maximumDpr,
+        1,
+        2.5,
+      );
       const dpr = Math.min(
-        Math.max(window.devicePixelRatio || 1, minimumDpr),
-        resourcePolicy.maximumDpr,
+        (window.devicePixelRatio || 1) * supersample,
+        maximumDpr,
       );
       const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
       const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
@@ -372,6 +377,7 @@
         canvas.height = height;
         gl.viewport(0, 0, width, height);
       }
+      canvas.dataset.renderDpr = dpr.toFixed(3);
 
       // 指数平滑让实时压力变化有重量感，同时避免突然放大造成视觉打扰。
       const targetPressure = clamp(Number(readPressure()) || 0, 0, 1);
@@ -503,7 +509,13 @@
       gl.uniform1f(shapeBlendUniform, shapeBlend);
       gl.uniform1f(rotationPhaseUniform, rotationPhase);
       gl.uniform1f(lensStrengthUniform, resourcePolicy.lensIntensity);
-      gl.uniform1i(rayStepsUniform, resourcePolicy.raySteps);
+      // 低步数会让盘面交点断成点阵；桌面层恢复第一版的 56 步完整积分。
+      const raySteps = Math.max(
+        resourcePolicy.raySteps,
+        Math.floor(Number(options.minimumRaySteps) || 0),
+      );
+      canvas.dataset.raySteps = String(raySteps);
+      gl.uniform1i(rayStepsUniform, raySteps);
       if (!backdropReady || captureGate?.isSuspended()) {
         backdropVisibility = 0;
       } else {
