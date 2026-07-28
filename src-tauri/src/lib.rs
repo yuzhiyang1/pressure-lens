@@ -294,8 +294,8 @@ fn configure_overlay(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     overlay.set_ignore_cursor_events(true)?;
     overlay.set_always_on_top(true)?;
     overlay.set_skip_taskbar(true)?;
-    // Windows 捕获本窗口下方画面时排除覆盖层，防止黑洞被再次捕获形成递归镜像。
-    overlay.set_content_protected(true)?;
+    // 桌面折射已关闭，不再存在递归采样风险；允许截图和录屏保留悬浮黑洞。
+    overlay.set_content_protected(false)?;
 
     if let Some(position) = load_visible_overlay_position(app, &overlay)? {
         overlay.set_position(position)?;
