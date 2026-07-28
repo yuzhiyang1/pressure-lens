@@ -83,7 +83,9 @@ test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
 });
 
 test("设置页可在三种桌面背景实时预览黑洞", async ({ page }) => {
-  test.setTimeout(60_000);
+  // GitHub Windows Runner 用 SwiftShader 串行编译仪表盘和设置预览两个真实着色器，
+  // 只放宽 CI 总时限，不改变任何就绪、背景切换或文案断言。
+  test.setTimeout(process.env.CI ? 120_000 : 60_000);
   await page.goto("/index.html?preview=55");
   // 先让仪表盘控制器完成初始化，再切页，验证两个渲染器不会争抢首帧。
   await expect(page.locator("#orbit")).toHaveClass(/is-ready/);
