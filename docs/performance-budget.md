@@ -30,6 +30,11 @@ private memory, 585.92–602.24 MB peak working set, and -4.05–1.13 MB private
 30 seconds. The previous raw-frame implementation reached about 3.33 GB private memory; compressed
 frame IPC and explicit `ImageBitmap` disposal removed that growth.
 
+The six-shape tour uses a 15 FPS balanced-mode cap while retaining 2.5 DPR spatial supersampling.
+On the representative Windows machine it measured 11.71% average GPU and 15.20% peak GPU across
+a 30-second multi-shape interval. The manual representative-machine ceiling is 20%; hosted CI
+cannot enforce this signal because it has no stable hardware-backed desktop.
+
 The committed values are upper safety limits, not targets. Eco and balanced modes should normally
 sit below them. A release may tighten the thresholds after a representative hardware sample. Hosted
 CI's software-rendering CPU number must never be used to relax the physical-machine CPU budget.

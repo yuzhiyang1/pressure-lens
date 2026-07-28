@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=9").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=10").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
@@ -109,6 +109,7 @@
     gl.uniform1i(backdropUniform, 0);
 
     const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const startedAt = performance.now();
     let renderedPressure = clamp(Number(readPressure()) || 0, 0, 1);
     let previousFrameAt = 0;
     let semanticState = String(options.readVisualState?.() ?? "uncertain");
@@ -116,6 +117,7 @@
     let shapeTo = shapeFrom;
     let shapeBlend = 1;
     let shapeTransitionElapsed = 2;
+    let shapeTourElapsed = 0;
     let decorativeSlot = 0;
     let rotationPhase = 0;
     let animationPhase = 0;
@@ -347,16 +349,20 @@
       renderRequest = null;
       requestRender();
       const frameInterval = 1000 / resourcePolicy.framesPerSecond;
+      canvas.dataset.framesPerSecond = String(resourcePolicy.framesPerSecond);
       if (now - previousFrameAt < frameInterval) {
         return;
       }
-      const elapsedSeconds = previousFrameAt === 0
+      const wallElapsedSeconds = previousFrameAt === 0
         ? frameInterval / 1000
-        : Math.min((now - previousFrameAt) / 1000, 0.1);
+        : (now - previousFrameAt) / 1000;
+      const elapsedSeconds = Math.min(wallElapsedSeconds, 0.1);
       previousFrameAt = now;
       // Windows“减少动画”只降低运动幅度，不把黑洞冻结成静态图。
       const motionScale = window.PressureVisuals.motionScale(reduceMotion);
       animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
+      // 形态巡游不再绑定纹理流速，避免默认 0.65 强度或系统减少动画让形态长时间不变。
+      shapeTourElapsed = Math.max(0, (now - startedAt) / 1000);
 
       // 仪表盘沿用资源策略；桌面悬浮层可恢复第一版的独立超采样。
       // 这样只增加 420×420 覆盖层的 GPU 清晰度，不提高后台采集频率和主界面开销。
@@ -382,11 +388,15 @@
       // 指数平滑让实时压力变化有重量感，同时避免突然放大造成视觉打扰。
       const targetPressure = clamp(Number(readPressure()) || 0, 0, 1);
       renderedPressure += (targetPressure - renderedPressure) * 0.055;
-      // 默认一个视觉族稳定表达一种状态；用户开启巡游后也只在同一语义族内切换。
+      // 关闭巡游时由压力语义决定形态；开启后以当前语义形态为起点巡游六种造型。
       const nextSemanticState = String(options.readVisualState?.() ?? "uncertain");
-      const family = window.PressureVisuals.familyFor(nextSemanticState);
+      const family = resourcePolicy.decorativeShapeTour
+        ? window.PressureVisuals.tourFor(nextSemanticState)
+        : window.PressureVisuals.familyFor(nextSemanticState);
+      canvas.dataset.tourEnabled = String(resourcePolicy.decorativeShapeTour);
+      canvas.dataset.tourSize = String(family.length);
       const nextDecorativeSlot = resourcePolicy.decorativeShapeTour
-        ? Math.floor(animationPhase / 14) % family.length
+        ? window.PressureVisuals.tourSlot(shapeTourElapsed, family.length)
         : 0;
       const nextShape = options.shapeOverride == null
         ? family[nextDecorativeSlot]
@@ -409,8 +419,14 @@
         shapeBlend = options.shapeOverride - shapeFrom;
       } else if (shapeBlend < 1) {
         shapeTransitionElapsed += elapsedSeconds;
-        shapeBlend = reduceMotion ? 1 : Math.min(1, shapeTransitionElapsed / 2);
+        // 系统减少动画时拉长形变过程，避免瞬切，也不会让巡游等待一分钟才发生。
+        shapeBlend = Math.min(
+          1,
+          shapeTransitionElapsed / (reduceMotion ? 4 : 2),
+        );
       }
+      canvas.dataset.shapeFrom = String(shapeFrom);
+      canvas.dataset.shapeTo = String(shapeTo);
       if (resourcePolicy.animationIntensity > 0) {
         // 旋转相位独立累计，压力只改变当下速度，不会因 pressure * time 突然跳角度。
         const rotationRate =
@@ -502,12 +518,15 @@
         gl.bindTexture(gl.TEXTURE_2D, backdropTexture);
       }
       gl.uniform2f(resolutionUniform, width, height);
-      gl.uniform1f(timeUniform, animationPhase);
+      gl.uniform1f(timeUniform, options.timeOverride ?? animationPhase);
       gl.uniform1f(pressureUniform, renderedPressure);
       gl.uniform1i(shapeFromUniform, shapeFrom);
       gl.uniform1i(shapeToUniform, shapeTo);
       gl.uniform1f(shapeBlendUniform, shapeBlend);
-      gl.uniform1f(rotationPhaseUniform, rotationPhase);
+      gl.uniform1f(
+        rotationPhaseUniform,
+        options.rotationOverride ?? rotationPhase,
+      );
       gl.uniform1f(lensStrengthUniform, resourcePolicy.lensIntensity);
       // 低步数会让盘面交点断成点阵；桌面层恢复第一版的 56 步完整积分。
       const raySteps = Math.max(

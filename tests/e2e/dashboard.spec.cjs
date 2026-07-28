@@ -35,4 +35,5 @@ test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
   await expect(page.locator("#settings-status")).toHaveText("预览设置已生效");
   await expect(page.getByRole("checkbox", { name: /键盘节奏/ })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: /Agent Provider/ })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /装饰形态巡游/ })).toBeChecked();
 });

@@ -7,9 +7,15 @@ test("桌面黑洞恢复第一版的超采样与完整光线步数", async ({ pa
     page.locator("#blackhole-canvas").evaluate((canvas) => ({
       dpr: canvas.width / canvas.clientWidth,
       raySteps: Number(canvas.dataset.raySteps),
+      framesPerSecond: Number(canvas.dataset.framesPerSecond),
+      tourEnabled: canvas.dataset.tourEnabled,
+      tourSize: Number(canvas.dataset.tourSize),
     }))
   )).toEqual({
     dpr: 1.75,
     raySteps: 56,
+    framesPerSecond: 15,
+    tourEnabled: "true",
+    tourSize: 6,
   });
 });

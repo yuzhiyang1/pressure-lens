@@ -12,6 +12,7 @@
     overloaded: Object.freeze([4, 5, 0]),
     uncertain: Object.freeze([0]),
   });
+  const visibleTour = Object.freeze([0, 1, 2, 3, 4, 5]);
 
   function familyFor(semanticState) {
     return families[String(semanticState)] ?? families.uncertain;
@@ -19,6 +20,20 @@
 
   function primaryShape(semanticState) {
     return familyFor(semanticState)[0];
+  }
+
+  function tourFor(semanticState) {
+    const primary = primaryShape(semanticState);
+    return Object.freeze([
+      primary,
+      ...visibleTour.filter((shape) => shape !== primary),
+    ]);
+  }
+
+  function tourSlot(elapsedSeconds, familyLength, secondsPerShape = 10) {
+    const length = Math.max(1, Math.floor(Number(familyLength) || 1));
+    const interval = Math.max(1, Number(secondsPerShape) || 10);
+    return Math.floor(Math.max(0, Number(elapsedSeconds) || 0) / interval) % length;
   }
 
   function motionScale(reduceMotion) {
@@ -32,5 +47,7 @@
     familyFor,
     motionScale,
     primaryShape,
+    tourFor,
+    tourSlot,
   });
 });

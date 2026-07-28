@@ -30,7 +30,7 @@ const defaultSettings = Object.freeze({
   },
   retention_days: 30,
   launch_at_startup: false,
-  decorative_shape_tour: false,
+  decorative_shape_tour: true,
 });
 
 function formatTokens(value) {

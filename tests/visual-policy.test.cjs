@@ -12,6 +12,14 @@ test("高压力仍保留更热、更宽的形态族", () => {
   assert.deepEqual(visualPolicy.familyFor("overloaded"), [4, 5, 0]);
 });
 
+test("装饰巡游在任何压力语义下都会经过六种可见形态", () => {
+  assert.deepEqual(visualPolicy.tourFor("uncertain"), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(visualPolicy.tourFor("focused"), [1, 0, 2, 3, 4, 5]);
+  assert.equal(visualPolicy.tourSlot(9.99, 6), 0);
+  assert.equal(visualPolicy.tourSlot(10, 6), 1);
+  assert.equal(visualPolicy.tourSlot(60, 6), 0);
+});
+
 test("默认视觉保持原版流光，不叠加桌面折射蒙层", () => {
   assert.equal(visualPolicy.desktopRefractionEnabled, false);
 });

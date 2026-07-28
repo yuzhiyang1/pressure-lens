@@ -10,7 +10,7 @@
       backdropFramesPerSecond: 0.25,
     }),
     balanced: Object.freeze({
-      framesPerSecond: 20,
+      framesPerSecond: 15,
       maximumDpr: 1.5,
       raySteps: 40,
       backdropFramesPerSecond: 1,
@@ -30,8 +30,8 @@
       ...tier,
       animationIntensity: clamp(intensities.animationIntensity ?? 0.75, 0, 1),
       lensIntensity: clamp(intensities.lensIntensity ?? 0.65, 0, 1),
-      // 形态巡游是明确的用户偏好；默认关闭以保持“一个形态代表一种状态”。
-      decorativeShapeTour: Boolean(intensities.decorativeShapeTour),
+      // 默认开启 Ghostty 风格巡游；用户仍可在设置页关闭并回到稳定语义形态。
+      decorativeShapeTour: Boolean(intensities.decorativeShapeTour ?? true),
     });
   }
 

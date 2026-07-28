@@ -68,14 +68,15 @@ the current semantic family.
 
 ## Performance
 
-Performance is a release gate. Balanced mode is capped at 20 FPS, 1 FPS lens capture, 1.35 DPR,
-and 40 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture.
+Performance is a release gate. Balanced mode is capped at 15 FPS and 1 FPS lens capture, while the desktop black hole keeps up to 2.5 DPR
+spatial supersampling and 56 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture.
 
 Validated full-process-tree results (Rust, two WebViews, and GPU):
 
 | Metric | v0.2.0 observed | CI gate |
 | --- | ---: | ---: |
 | Normalized CPU | 1.11–2.64% | ≤ 3% |
+| GPU (six-shape tour) | 11.71% average, 15.20% peak | representative machine manual gate ≤ 20% |
 | Peak private memory | 340.38–351.06 MB | ≤ 450 MB |
 | Peak working set | 585.92–602.24 MB | ≤ 700 MB |
 | 30-second private-memory change | -4.05–1.13 MB | growth ≤ 30 MB |

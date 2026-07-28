@@ -56,7 +56,8 @@ float diskTexture(
     float time,
     float speed,
     float wind,
-    float contrast
+    float contrast,
+    float projectedPixelFootprint
 ) {
     float spiral = radius * wind - time * speed / max(pow(radius, 1.5), 1.0);
     // 角向格点按完整圈数包裹，避免正视形态在 atan 分支处出现水平接缝。
@@ -68,8 +69,16 @@ float diskTexture(
         vec2(radius * 5.4 + 7.0, turns * 43.0 + spiral * 7.0),
         43.0
     );
+    // 侧视盘会把几十条角向细纹压进一个屏幕像素。继续提高 DPR 只能延后摩尔纹，
+    // 这里按投影后的像素足迹逐级收掉不可分辨的细层，保留可见的宽流光。
+    float coarseRate = projectedPixelFootprint * (2.6 + 4.0 * abs(wind));
+    float fineRate = projectedPixelFootprint * (5.4 + 7.0 * abs(wind));
+    float coarseVisibility = 1.0 - smoothstep(0.32, 0.95, coarseRate);
+    float fineVisibility = 1.0 - smoothstep(0.18, 0.62, fineRate);
+    float filteredA = mix(0.5, a, coarseVisibility);
+    float filteredB = mix(filteredA, b, fineVisibility);
     float threads = pow(
-        clamp(a * 0.68 + b * 0.32, 0.0, 1.0),
+        clamp(filteredA * 0.76 + filteredB * 0.24, 0.0, 1.0),
         max(contrast, 0.35)
     );
     return 0.24 + 1.55 * threads;
@@ -200,6 +209,9 @@ void main() {
     float inclination = look.inclination;
     float cosineInclination = cos(inclination);
     float sineInclination = sin(inclination);
+    float projectedPixelFootprint =
+        (worldScale / uResolution.y)
+        / max(abs(cosineInclination), 0.32);
     vec3 diskNormal = vec3(0.0, sineInclination, cosineInclination);
     vec3 diskAxisY = vec3(0.0, cosineInclination, -sineInclination);
     vec3 emitted = vec3(0.0);
@@ -258,7 +270,8 @@ void main() {
                     uTime * localTime * mix(0.42, 0.18, eased),
                     look.speed,
                     look.wind,
-                    look.contrast
+                    look.contrast,
+                    projectedPixelFootprint
                 );
                 float thermal = pow(diskInner / diskRadius, 0.58);
                 vec3 color = thermalColor(thermal, look.temperature);
@@ -292,7 +305,8 @@ void main() {
     }
 
     // 临界冲量参数附近强化光子环，让边缘更接近原项目的锐亮轮廓。
-    float photonRing = exp(-abs(impact - B_CRIT) * 17.0) * 0.18;
+    // 光子环至少覆盖数个内部像素，透明桌面合成时不会退化成断续点线。
+    float photonRing = exp(-abs(impact - B_CRIT) * 12.0) * 0.18;
     vec3 ringColor = mix(
         vec3(1.0, 0.58, 0.24),
         vec3(0.72, 0.86, 1.0),

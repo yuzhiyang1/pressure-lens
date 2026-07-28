@@ -11,6 +11,14 @@ const shapeParameter = urlParameters.get("shape");
 const shapeOverride = shapeParameter == null
   ? null
   : Math.max(0, Math.min(6.999, Number(shapeParameter) || 0));
+const rotationParameter = urlParameters.get("rotation");
+const rotationOverride = rotationParameter == null
+  ? null
+  : (Number(rotationParameter) || 0) * Math.PI / 180;
+const timeParameter = urlParameters.get("time");
+const timeOverride = timeParameter == null
+  ? null
+  : Math.max(0, Number(timeParameter) || 0);
 const lensStatus = document.querySelector("#overlay-lens-status");
 
 const labels = {
@@ -28,7 +36,7 @@ let currentSettings = {
   performance_mode: "balanced",
   animation_intensity: 0.65,
   lens_intensity: 0.55,
-  decorative_shape_tour: false,
+  decorative_shape_tour: true,
 };
 // 桌面折射暂时关闭：悬浮层不再截取桌面，因此拖动时不会携带旧位置采样。
 const desktopRefractionEnabled = window.PressureVisuals.desktopRefractionEnabled;
@@ -218,7 +226,7 @@ setInterval(refreshOverlay, 10_000);
 window.PressureBlackHole
   .start(canvas, () => targetPressure, {
     resourceMode: "balanced",
-    // 恢复第一版桌面黑洞的采样预算；20 FPS 仍由平衡模式控制。
+    // 恢复第一版桌面黑洞的空间采样；15 FPS 由默认平衡模式控制。
     supersample: 1.75,
     maximumDpr: 2.5,
     minimumRaySteps: 56,
@@ -243,6 +251,9 @@ window.PressureBlackHole
       lensStatus.classList.remove("is-active");
     },
     shapeOverride,
+    // 仅浏览器视觉验收使用，例如 ?rotation=90 固定最容易混叠的角度。
+    rotationOverride,
+    timeOverride,
   })
   .then(async (controller) => {
     rendererController = controller;
