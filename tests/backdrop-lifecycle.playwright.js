@@ -31,13 +31,13 @@ async (page) => {
     });
 
     await new Promise((resolve) => setTimeout(resolve, 40));
-    controller.suspendBackdrop();
+    await controller.prepareForDrag();
     // 模拟拖动前旧坐标截图在暂停后才返回。
     releaseStaleFrame(makeFrame(220, 40, 20));
     await new Promise((resolve) => setTimeout(resolve, 40));
     const callsWhileSuspended = captureCalls;
 
-    controller.resumeBackdrop();
+    await controller.resumeAfterDrag();
     await new Promise((resolve) => setTimeout(resolve, 80));
     const callsAfterResume = captureCalls;
     canvas.remove();

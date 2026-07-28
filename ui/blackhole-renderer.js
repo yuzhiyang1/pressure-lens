@@ -6,6 +6,9 @@
     if (!window.PressureResources) {
       throw new Error("资源策略未加载");
     }
+    if (!window.PressureVisuals) {
+      throw new Error("视觉策略未加载");
+    }
     let resourcePolicy = window.PressureResources.resolve(
       options.resourceMode ?? "balanced",
       {
@@ -108,14 +111,8 @@
     const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let renderedPressure = clamp(Number(readPressure()) || 0, 0, 1);
     let previousFrameAt = 0;
-    const visualFamilies = Object.freeze({
-      calm: Object.freeze([3, 2]),
-      focused: Object.freeze([1, 0]),
-      overloaded: Object.freeze([4, 5, 0]),
-      uncertain: Object.freeze([6]),
-    });
     let semanticState = String(options.readVisualState?.() ?? "uncertain");
-    let shapeFrom = visualFamilies[semanticState]?.[0] ?? 6;
+    let shapeFrom = window.PressureVisuals.primaryShape(semanticState);
     let shapeTo = shapeFrom;
     let shapeBlend = 1;
     let shapeTransitionElapsed = 2;
@@ -135,6 +132,7 @@
       captureRequests: 0,
       textureAllocations: 1,
       textureUpdates: 0,
+      dragPresentationBarriers: 0,
     };
     const captureGate = typeof options.readBackdrop === "function"
       ? new window.PressureBackdrop.BackdropCaptureGate()
@@ -306,7 +304,8 @@
       gl.useProgram(program);
       gl.uniform1f(backdropReadyUniform, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
-      gl.flush();
+      // 拖动是低频交互，这里允许短暂等待 GPU，避免 DWM 拿到尚未完成的旧折射表面。
+      gl.finish();
     };
 
     const suspendBackdrop = () => {
@@ -337,6 +336,27 @@
         captureUrgent = false;
         scheduleBackdropCapture(0);
       }
+    };
+
+    const waitForPresentedFrame = () => new Promise((resolve) => {
+      // Promise 在 rAF 回调中 resolve 时，后续微任务仍可能早于本轮 paint。
+      // 双 rAF 后再切到 timer task，调用方拿到控制权时干净画面已经有机会提交给 DWM。
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.setTimeout(resolve, 0));
+      });
+    });
+
+    const prepareForDrag = async () => {
+      suspendBackdrop();
+      requestRender();
+      await waitForPresentedFrame();
+      diagnostics.dragPresentationBarriers += 1;
+    };
+
+    const resumeAfterDrag = async () => {
+      // 原生拖动返回后先跨过最终位置的合成周期，再从新坐标发起第一张桌面截图。
+      await waitForPresentedFrame();
+      resumeBackdrop();
     };
 
     const requestRender = () => {
@@ -374,7 +394,7 @@
       renderedPressure += (targetPressure - renderedPressure) * 0.055;
       // 默认一个视觉族稳定表达一种状态；用户开启巡游后也只在同一语义族内切换。
       const nextSemanticState = String(options.readVisualState?.() ?? "uncertain");
-      const family = visualFamilies[nextSemanticState] ?? visualFamilies.uncertain;
+      const family = window.PressureVisuals.familyFor(nextSemanticState);
       const nextDecorativeSlot = resourcePolicy.decorativeShapeTour
         ? Math.floor(animationPhase / 14) % family.length
         : 0;
@@ -557,6 +577,8 @@
     return Object.freeze({
       suspendBackdrop,
       resumeBackdrop,
+      prepareForDrag,
+      resumeAfterDrag,
       setVisible,
       setPaused,
       setPolicy,

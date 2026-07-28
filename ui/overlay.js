@@ -99,20 +99,21 @@ lens.addEventListener("pointerdown", async (event) => {
   }
 
   event.preventDefault();
-  rendererController?.suspendBackdrop();
   lensStatus.textContent = "移动中 · 折射暂停";
   lensStatus.classList.remove("is-active");
   lens.classList.add("is-dragging");
   try {
+    // 必须等“无桌面纹理”的画面真正提交后再进入原生拖动，否则 DWM 会搬走上一帧采样。
+    await rendererController?.prepareForDrag();
     // 交给系统窗口管理器拖动，跨显示器和 DPI 缩放时比手算坐标更可靠。
     await invoke("start_overlay_dragging");
   } finally {
     // 松手后立即恢复鼠标穿透；再次移动前必须先移出黑洞再重新悬停。
     await invoke("finish_overlay_dragging").catch(() => {});
-    rendererController?.resumeBackdrop();
     lensStatus.textContent = "重新采样中";
     updateHoverProgress();
     lens.classList.remove("is-dragging");
+    await rendererController?.resumeAfterDrag();
   }
 });
 
