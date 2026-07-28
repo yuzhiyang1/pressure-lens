@@ -23,7 +23,7 @@ use std::{
 };
 
 use collector::ActivityCollector;
-use desktop_capture::{CaptureRect, capture};
+use desktop_capture::{CaptureRect, capture_behind_window};
 use model::DashboardSnapshot;
 use monitoring::{DashboardData, MonitoringCore};
 use overlay_movement::OverlayMoveState;
@@ -162,12 +162,16 @@ async fn capture_overlay_background(app: AppHandle) -> Result<Response, String> 
     let size = overlay
         .inner_size()
         .map_err(|error| format!("无法读取悬浮窗尺寸：{error}"))?;
+    let overlay_handle = overlay
+        .hwnd()
+        .map_err(|error| format!("无法读取悬浮窗句柄：{error}"))?
+        .0 as usize;
     let rect = CaptureRect::new(position.x, position.y, size.width, size.height)?;
 
     // GDI 复制和 JPEG 压缩都放入阻塞线程；二进制帧不转 Base64，也不会写入磁盘。
     let payload = tauri::async_runtime::spawn_blocking(move || {
         // 以低质量损失换取约一个数量级的 IPC 体积下降，避免 WebView 长期保留大块 RGBA 消息。
-        capture(rect).and_then(|frame| frame.into_jpeg(72))
+        capture_behind_window(rect, overlay_handle).and_then(|frame| frame.into_jpeg(72))
     })
     .await
     .map_err(|error| format!("桌面捕获线程异常：{error}"))??;
