@@ -1,25 +1,34 @@
 mod agent_sessions;
+mod assessment;
+mod calibration;
 mod collector;
 mod desktop_capture;
 mod model;
+mod monitoring;
 mod overlay_movement;
 mod pressure;
+mod providers;
+mod settings;
+mod signal_timeline;
 mod storage;
+mod updates;
 
 use std::{
-    fs,
-    sync::{Arc, Mutex},
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
-use chrono::Local;
 use collector::ActivityCollector;
 use desktop_capture::{CaptureRect, capture};
 use model::DashboardSnapshot;
+use monitoring::{DashboardData, MonitoringCore};
 use overlay_movement::OverlayMoveState;
-use pressure::calculate_pressure;
 use serde::{Deserialize, Serialize};
+use settings::AppSettings;
 use storage::Storage;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow, WindowEvent,
@@ -27,11 +36,13 @@ use tauri::{
     menu::{Menu, MenuItemBuilder},
     tray::TrayIconBuilder,
 };
+use tauri_plugin_autostart::ManagerExt as _;
+use updates::PendingUpdate;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Graphics::Dwm::DwmFlush;
 
 struct AppState {
-    collector: Arc<ActivityCollector>,
-    storage: Mutex<Storage>,
-    last_persisted_at: Mutex<Option<Instant>>,
+    monitoring: Arc<MonitoringCore>,
     overlay_move: OverlayMoveState,
 }
 
@@ -50,52 +61,49 @@ struct OverlayHoverPayload {
 
 #[tauri::command]
 fn get_snapshot(state: State<'_, AppState>) -> DashboardSnapshot {
-    let sample = state.collector.snapshot();
-    let pressure = calculate_pressure(&sample);
-
-    // 首次读取立即落盘，之后最多每分钟写一次，保持数据足够细且避免频繁磁盘 I/O。
-    if let Ok(mut last_persisted_at) = state.last_persisted_at.lock() {
-        let should_persist = last_persisted_at
-            .map(|instant| instant.elapsed() >= Duration::from_secs(60))
-            .unwrap_or(true);
-        if should_persist {
-            if let Ok(storage) = state.storage.lock() {
-                if storage
-                    .save_sample(Local::now(), &sample, &pressure)
-                    .is_ok()
-                {
-                    *last_persisted_at = Some(Instant::now());
-                }
-            }
-        }
-    }
-
-    DashboardSnapshot { sample, pressure }
+    // 纯读 Interface：持久化由 MonitoringCore 的后台分钟节拍负责。
+    state.monitoring.snapshot()
 }
 
 #[tauri::command]
-fn record_agent_metrics(
-    context_percent: f64,
-    active_agents: u32,
-    recent_failures: u32,
+fn get_dashboard_data(state: State<'_, AppState>) -> Result<DashboardData, String> {
+    state.monitoring.dashboard_data()
+}
+
+#[tauri::command]
+fn record_self_report(
+    value: u8,
+    app: AppHandle,
     state: State<'_, AppState>,
-) {
-    state
-        .collector
-        .update_agent_metrics(context_percent, active_agents, recent_failures);
+) -> Result<DashboardSnapshot, String> {
+    let snapshot = state.monitoring.record_self_report(value)?;
+    let _ = app.emit("snapshot-updated", &snapshot);
+    Ok(snapshot)
 }
 
 #[tauri::command]
-fn record_self_report(value: u8, state: State<'_, AppState>) -> Result<(), String> {
-    if !(1..=5).contains(&value) {
-        return Err("自评值必须在 1 到 5 之间".to_string());
-    }
-    state
-        .storage
-        .lock()
-        .map_err(|_| "数据库锁不可用".to_string())?
-        .save_self_report(Local::now(), value)
-        .map_err(|error| error.to_string())
+fn get_settings(state: State<'_, AppState>) -> AppSettings {
+    state.monitoring.settings()
+}
+
+#[tauri::command]
+fn update_settings(
+    settings: AppSettings,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DashboardSnapshot, String> {
+    let normalized = settings.normalized();
+    apply_autostart(&app, normalized.launch_at_startup)?;
+    let snapshot = state.monitoring.update_settings(normalized.clone())?;
+    app.emit("settings-updated", &normalized)
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("snapshot-updated", &snapshot);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn clear_history(today_only: bool, state: State<'_, AppState>) -> Result<DashboardData, String> {
+    state.monitoring.clear_history(today_only)
 }
 
 #[tauri::command]
@@ -104,10 +112,13 @@ fn set_overlay_visible(visible: bool, app: AppHandle) -> Result<(), String> {
         .get_webview_window("overlay")
         .ok_or_else(|| "桌面黑洞窗口不存在".to_string())?;
     if visible {
-        overlay.show().map_err(|error| error.to_string())
+        overlay.show().map_err(|error| error.to_string())?;
     } else {
-        overlay.hide().map_err(|error| error.to_string())
+        overlay.hide().map_err(|error| error.to_string())?;
     }
+    // 覆盖层 WebView 收到事件后会真正停止/恢复渲染和桌面捕获。
+    app.emit_to("overlay", "overlay-visibility", visible)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -155,12 +166,31 @@ async fn capture_overlay_background(app: AppHandle) -> Result<Response, String> 
         .map_err(|error| format!("无法读取悬浮窗尺寸：{error}"))?;
     let rect = CaptureRect::new(position.x, position.y, size.width, size.height)?;
 
-    // GDI 复制放入阻塞线程；返回值是原始二进制帧，既不转 Base64，也不会写入磁盘。
-    let payload = tauri::async_runtime::spawn_blocking(move || {
-        capture(rect).map(|frame| frame.into_ipc_payload())
-    })
-    .await
-    .map_err(|error| format!("桌面捕获线程异常：{error}"))??;
+    // 只在内部背景采样的极短窗口排除自身，避免递归镜像；平时仍允许用户截图和录屏。
+    overlay
+        .set_content_protected(true)
+        .map_err(|error| format!("无法隔离悬浮窗采样：{error}"))?;
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // 等待显示属性进入 DWM 合成队列，再读取黑洞下方的桌面。
+        let _ = DwmFlush();
+    }
+
+    let captured = tauri::async_runtime::spawn_blocking(move || capture(rect))
+        .await
+        .map_err(|error| format!("桌面捕获线程异常：{error}"));
+
+    // 无论捕获是否成功，都要立即恢复用户可截图状态。
+    let restore_result = overlay
+        .set_content_protected(false)
+        .map_err(|error| format!("无法恢复悬浮窗截图：{error}"));
+    let frame = captured??;
+    restore_result?;
+
+    // JPEG 压缩放在恢复可截图之后，缩短内容保护的持续时间。
+    let payload = tauri::async_runtime::spawn_blocking(move || frame.into_jpeg(72))
+        .await
+        .map_err(|error| format!("桌面压缩线程异常：{error}"))??;
 
     Ok(Response::new(payload))
 }
@@ -170,14 +200,50 @@ fn initialize_state(app: &AppHandle) -> Result<AppState, Box<dyn std::error::Err
     fs::create_dir_all(&data_dir)?;
     let storage = Storage::open(&data_dir.join("pressure-lens.sqlite3"))?;
     let collector = Arc::new(ActivityCollector::default());
+    let monitoring = MonitoringCore::new(Arc::clone(&collector), storage)?;
     collector.start();
 
     Ok(AppState {
-        collector,
-        storage: Mutex::new(storage),
-        last_persisted_at: Mutex::new(None),
+        monitoring,
         overlay_move: OverlayMoveState::default(),
     })
+}
+
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    let currently_enabled = manager.is_enabled().map_err(|error| error.to_string())?;
+    if enabled && !currently_enabled {
+        manager.enable().map_err(|error| error.to_string())?;
+    } else if !enabled && currently_enabled {
+        manager.disable().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn install_panic_marker(path: PathBuf) {
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |information| {
+        // 只记录时间和代码位置，不写按键、窗口或 Agent 会话内容。
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&path)
+        {
+            let location = information
+                .location()
+                .map(|value| format!("{}:{}", value.file(), value.line()))
+                .unwrap_or_else(|| "unknown".to_string());
+            let _ = writeln!(
+                file,
+                "{} Pressure Lens panic at {}",
+                chrono::Local::now().to_rfc3339(),
+                location
+            );
+            let _ = file.sync_all();
+        }
+        previous_hook(information);
+    }));
 }
 
 fn overlay_position_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -198,19 +264,32 @@ fn save_overlay_position(app: &AppHandle) -> Result<(), String> {
         x: position.x,
         y: position.y,
     };
-    let json = serde_json::to_vec(&saved).map_err(|error| error.to_string())?;
-    fs::write(overlay_position_path(app)?, json).map_err(|error| error.to_string())
+    let json = serde_json::to_string(&saved).map_err(|error| error.to_string())?;
+    app.state::<AppState>()
+        .monitoring
+        .set_runtime_state("overlay_position", &json)
 }
 
 fn load_visible_overlay_position(
     app: &AppHandle,
     overlay: &WebviewWindow,
 ) -> Result<Option<PhysicalPosition<i32>>, Box<dyn std::error::Error>> {
-    let path = overlay_position_path(app)?;
-    let Ok(json) = fs::read(path) else {
-        return Ok(None);
+    let state = app.state::<AppState>();
+    let stored = state.monitoring.runtime_state("overlay_position")?;
+    let saved = if let Some(json) = stored {
+        serde_json::from_str(&json)?
+    } else {
+        // 仅为旧版本迁移读取一次 JSON；新版本全部使用 SQLite 事务写入。
+        let path = overlay_position_path(app)?;
+        let Ok(json) = fs::read(path) else {
+            return Ok(None);
+        };
+        let migrated: SavedOverlayPosition = serde_json::from_slice(&json)?;
+        state
+            .monitoring
+            .set_runtime_state("overlay_position", &serde_json::to_string(&migrated)?)?;
+        migrated
     };
-    let saved: SavedOverlayPosition = serde_json::from_slice(&json)?;
     let overlay_size = overlay.outer_size()?;
     let center_x = saved.x as i64 + overlay_size.width as i64 / 2;
     let center_y = saved.y as i64 + overlay_size.height as i64 / 2;
@@ -235,8 +314,7 @@ fn configure_overlay(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     overlay.set_ignore_cursor_events(true)?;
     overlay.set_always_on_top(true)?;
     overlay.set_skip_taskbar(true)?;
-    // Windows 捕获本窗口下方画面时排除覆盖层，防止黑洞被再次捕获形成递归镜像。
-    overlay.set_content_protected(true)?;
+    // 保持 Tauri 默认的非保护状态，让截图和录屏能够保留悬浮黑洞。
 
     if let Some(position) = load_visible_overlay_position(app, &overlay)? {
         overlay.set_position(position)?;
@@ -291,7 +369,8 @@ fn start_overlay_hover_watcher(app: AppHandle) {
     use windows_sys::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
 
     const HOVER_DURATION: Duration = Duration::from_secs(2);
-    const POLL_INTERVAL: Duration = Duration::from_millis(50);
+    const ACTIVE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+    const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(250);
     const INTERACTION_RADIUS_RATIO: f64 = 0.30;
 
     thread::spawn(move || {
@@ -331,7 +410,8 @@ fn start_overlay_hover_watcher(app: AppHandle) {
                     emit_overlay_hover(&app, 0.0, false);
                     last_progress_step = 0;
                 }
-                thread::sleep(POLL_INTERVAL);
+                // 鼠标远离黑洞时降到 4Hz；只有真正悬停时才用 20Hz 驱动蓄力环。
+                thread::sleep(IDLE_POLL_INTERVAL);
                 continue;
             }
 
@@ -342,7 +422,7 @@ fn start_overlay_hover_watcher(app: AppHandle) {
                     emit_overlay_hover(&app, 0.0, false);
                     last_progress_step = 0;
                 }
-                thread::sleep(POLL_INTERVAL);
+                thread::sleep(IDLE_POLL_INTERVAL);
                 continue;
             }
 
@@ -367,7 +447,7 @@ fn start_overlay_hover_watcher(app: AppHandle) {
                 }
             }
 
-            thread::sleep(POLL_INTERVAL);
+            thread::sleep(ACTIVE_POLL_INTERVAL);
         }
     });
 }
@@ -439,11 +519,7 @@ fn configure_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         "toggle-overlay" => {
             if let Some(window) = app.get_webview_window("overlay") {
                 let visible = window.is_visible().unwrap_or(false);
-                let _ = if visible {
-                    window.hide()
-                } else {
-                    window.show()
-                };
+                let _ = set_overlay_visible(!visible, app.clone());
             }
         }
         "move-overlay" => {
@@ -458,14 +534,50 @@ fn configure_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // 单实例必须最先注册，确保第二次启动在其他插件初始化前就被接管。
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _arguments, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            },
+        ))
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("pressure-lens".to_string()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
-            let state = initialize_state(&app.handle())?;
+            let data_dir = app.path().app_local_data_dir()?;
+            fs::create_dir_all(&data_dir)?;
+            install_panic_marker(data_dir.join("last-crash.txt"));
+            let state = initialize_state(app.handle())?;
+            let monitoring = Arc::clone(&state.monitoring);
+            let launch_at_startup = state.monitoring.settings().launch_at_startup;
             app.manage(state);
-            configure_overlay(&app.handle())?;
-            configure_tray(&app.handle())?;
+            app.manage(PendingUpdate::default());
+            apply_autostart(app.handle(), launch_at_startup)?;
+            configure_overlay(app.handle())?;
+            configure_tray(app.handle())?;
             start_overlay_move_hotkey(app.handle().clone());
             start_overlay_hover_watcher(app.handle().clone());
+            monitoring.start(app.handle().clone());
+            log::info!("Pressure Lens {} 已启动", app.package_info().version);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -479,15 +591,32 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
-            record_agent_metrics,
+            get_dashboard_data,
             record_self_report,
+            get_settings,
+            update_settings,
+            clear_history,
             set_overlay_visible,
             get_overlay_visible,
             get_overlay_move_mode,
             start_overlay_dragging,
             finish_overlay_dragging,
-            capture_overlay_background
-        ])
-        .run(tauri::generate_context!())
-        .expect("Pressure Lens 启动失败");
+            capture_overlay_background,
+            updates::check_for_update,
+            updates::install_update
+        ]);
+
+    if updates::is_configured() {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("Pressure Lens 构建失败");
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            app_handle.state::<AppState>().monitoring.finish_session();
+            log::info!("Pressure Lens 已正常退出");
+        }
+    });
 }

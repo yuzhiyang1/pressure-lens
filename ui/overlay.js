@@ -20,9 +20,27 @@ const labels = {
 };
 
 let targetPressure = 0;
+let targetVisualState = "uncertain";
 let previewBackdropPayload;
 let moveModeEnabled = false;
 let rendererController = null;
+let currentSettings = {
+  performance_mode: "balanced",
+  animation_intensity: 0.65,
+  lens_intensity: 0.55,
+  decorative_shape_tour: false,
+};
+// 桌面折射暂时关闭：悬浮层不再截取桌面，因此拖动时不会携带旧位置采样。
+const desktopRefractionEnabled = window.PressureVisuals.desktopRefractionEnabled;
+
+function applyRendererSettings(settings) {
+  currentSettings = { ...currentSettings, ...settings };
+  rendererController?.setPolicy(currentSettings.performance_mode, {
+    animationIntensity: currentSettings.animation_intensity,
+    lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
+    decorativeShapeTour: currentSettings.decorative_shape_tour,
+  });
+}
 
 function updateHoverProgress(payload = {}) {
   const progress = Math.max(0, Math.min(1, Number(payload.progress) || 0));
@@ -69,16 +87,12 @@ async function initializeMoveMode() {
   if (listen) {
     await listen("overlay-move-mode", (event) => updateMoveMode(event.payload));
     await listen("overlay-hover-progress", (event) => updateHoverProgress(event.payload));
+    await listen("overlay-visibility", (event) => {
+      rendererController?.setVisible(Boolean(event.payload));
+    });
+    await listen("settings-updated", (event) => applyRendererSettings(event.payload));
+    await listen("snapshot-updated", (event) => renderOverlaySnapshot(event.payload));
   }
-
-  // 全局快捷键不一定由当前 WebView 获得焦点；轻量轮询兜底同步视觉状态。
-  setInterval(async () => {
-    try {
-      updateMoveMode(await invoke("get_overlay_move_mode"));
-    } catch {
-      // 窗口退出期间忽略轮询失败，不影响正常关闭。
-    }
-  }, 350);
 }
 
 lens.addEventListener("pointerdown", async (event) => {
@@ -87,20 +101,21 @@ lens.addEventListener("pointerdown", async (event) => {
   }
 
   event.preventDefault();
-  rendererController?.suspendBackdrop();
   lensStatus.textContent = "移动中 · 折射暂停";
   lensStatus.classList.remove("is-active");
   lens.classList.add("is-dragging");
   try {
+    // 等旧位置的折射纹理从桌面合成器中清除后，只拖动黑洞本体。
+    await rendererController?.prepareForDrag();
     // 交给系统窗口管理器拖动，跨显示器和 DPI 缩放时比手算坐标更可靠。
     await invoke("start_overlay_dragging");
   } finally {
     // 松手后立即恢复鼠标穿透；再次移动前必须先移出黑洞再重新悬停。
     await invoke("finish_overlay_dragging").catch(() => {});
-    rendererController?.resumeBackdrop();
     lensStatus.textContent = "重新采样中";
     updateHoverProgress();
     lens.classList.remove("is-dragging");
+    rendererController?.resumeAfterDrag();
   }
 });
 
@@ -156,6 +171,8 @@ async function refreshOverlay() {
       0,
       Math.min(1, Number(previewValue) || 0),
     );
+    targetVisualState =
+      targetPressure >= .7 ? "overloaded" : targetPressure >= .4 ? "focused" : "calm";
     document.querySelector("#overlay-score").textContent = Math.round(targetPressure * 100);
     document.querySelector("#overlay-label").textContent =
       targetPressure >= .7
@@ -168,24 +185,46 @@ async function refreshOverlay() {
 
   try {
     const snapshot = await invoke("get_snapshot");
-    targetPressure = snapshot.pressure.score / 100;
-    document.querySelector("#overlay-score").textContent = Math.round(snapshot.pressure.score);
-    document.querySelector("#overlay-label").textContent =
-      labels[snapshot.pressure.level] ?? "建立基线";
+    renderOverlaySnapshot(snapshot);
   } catch {
     document.querySelector("#overlay-label").textContent = "状态暂不可用";
   }
 }
 
+function renderOverlaySnapshot(snapshot) {
+  targetPressure = snapshot.pressure.score / 100;
+  targetVisualState = snapshot.pressure.visual_state ?? "uncertain";
+  document.querySelector("#overlay-score").textContent = Math.round(snapshot.pressure.score);
+  document.querySelector("#overlay-label").textContent = snapshot.sample.collection_paused
+    ? "采集已暂停"
+    : snapshot.quiet_hours_active
+      ? "安静时段"
+      : labels[snapshot.pressure.level] ?? "建立基线";
+  // “暂停全部采集”同样停止桌面截图；悬浮窗只保留最后一帧，不再读取桌面。
+  rendererController?.setPaused(Boolean(
+    snapshot.quiet_hours_active || snapshot.sample.collection_paused,
+  ));
+}
+
+async function initializeSettings() {
+  if (!invoke) {
+    return;
+  }
+  applyRendererSettings(await invoke("get_settings"));
+}
+
 initializeMoveMode().catch(() => updateMoveMode(false));
+initializeSettings().catch(() => {});
 refreshOverlay();
-setInterval(refreshOverlay, 2000);
+// snapshot-updated 是主通道；低频轮询只负责 WebView 休眠恢复后的自愈。
+setInterval(refreshOverlay, 10_000);
 window.PressureBlackHole
   .start(canvas, () => targetPressure, {
-    maximumDpr: 2.5,
-    supersample: 1.75,
-    framesPerSecond: 30,
-    backdropFramesPerSecond: 12,
+    resourceMode: "balanced",
+    animationIntensity: currentSettings.animation_intensity,
+    lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
+    decorativeShapeTour: currentSettings.decorative_shape_tour,
+    readVisualState: () => targetVisualState,
     readBackdrop: invoke
       ? () => invoke("capture_overlay_background")
       : urlParameters.has("backdrop")
@@ -205,10 +244,20 @@ window.PressureBlackHole
     },
     shapeOverride,
   })
-  .then((controller) => {
+  .then(async (controller) => {
     rendererController = controller;
+    // 浏览器验收复用页面上唯一的真实 WebGL 渲染器，避免重复编译 Shader。
+    if (!invoke) {
+      window.PressureOverlayPreview = Object.freeze({ controller });
+    }
+    if (invoke) {
+      controller.setVisible(await invoke("get_overlay_visible").catch(() => true));
+    }
+    applyRendererSettings(currentSettings);
     lens.classList.add("is-ready");
   })
   .catch((error) => {
     document.querySelector("#overlay-label").textContent = `渲染失败：${error.message}`;
   });
+
+window.addEventListener("beforeunload", () => rendererController?.dispose());

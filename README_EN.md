@@ -2,113 +2,98 @@
 
 [中文](./README.md) | [English](./README_EN.md)
 
-Pressure Lens is a local-first cognitive workload visualizer for Windows. It
-combines typing intensity, modifier-key ratio, application switching,
-continuous activity, and Agent context usage into an explainable view of your
-workload throughout the day.
+Pressure Lens is a local-first cognitive-workload visualizer for Windows. It turns aggregated
+typing rhythm, app switches, continuous activity, and Agent context signals into an explainable,
+calibrated live score and a real daily history.
 
-> Status: experimental Windows MVP. Its pressure score reflects work patterns;
-> it is not a medical or mental-health assessment.
+> The score describes work patterns. It is not a medical or mental-health assessment. Typed
+> characters, window titles, and conversation content are not recorded.
 
-## What it does
+## What is implemented
 
-- Shows current pressure, contributing factors, Agent context usage, and daily
-  trends in a dashboard.
-- Automatically collects global keyboard activity, foreground-app switches,
-  and continuous activity on Windows without recording typed characters.
-- Reads structured token metrics from local Codex sessions without reading
-  conversation content.
-- Displays a transparent, always-on-top, click-through WebGL black hole.
-- Uses live desktop sampling for local gravitational lensing and rejects stale
-  frames while dragging to prevent trails.
-- Controls black-hole visibility and position through the tray, a shortcut, or
-  a hover interaction.
+- A true rolling 60-second window with no whole-minute reset jump.
+- Background assessment every two seconds and an independent SQLite Journal write every minute.
+- Real daily history, average, peak, high-pressure minutes, self-report count, and daily summary.
+- Personal calibration from self-reports: the first report can move a score by at most 3 points;
+  repeated evidence builds a bounded adjustment of at most 15 points.
+- Confidence, window coverage, and per-source health.
+- One concrete recovery action at high pressure.
+- Settings for performance, animation/lensing strength, quiet hours, pause, privacy switches,
+  retention, autostart, and history deletion.
+- Single instance, tray residency, bounded file logs, unclean-exit recovery, SQLite WAL, and
+  off-screen overlay protection.
 
-## Black-hole visuals
+## Agent Providers
 
-The desktop black hole is rendered by a transparent WebGL2 shader. Its
-Schwarzschild photon paths, thin accretion-disk crossings, temperature
-gradient, and relativistic beaming model are adapted from the MIT-licensed
-[`s0xDk/ghostty-blackhole`](https://github.com/s0xDk/ghostty-blackhole).
-See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for attribution.
+Providers parse structured metadata only; Pressure Lens does not persist conversation content.
 
-The black hole continuously drifts and rotates while morphing between seven
-looks: Inferno, Gargantua, M87* donut, Face-on ember, Quasar, Blazar, and Pure
-lens. It normally enters a new look every 7–12 seconds and completes a tour in
-roughly 48–82 seconds. Higher pressure increases its travel, rotation speed,
-morphing speed, and event-horizon size. Accumulated animation phases prevent
-pressure changes from causing visible jumps.
+| Provider | Quality | Collection |
+| --- | --- | --- |
+| Codex | Exact | Latest `token_count` and context window under `.codex/sessions` |
+| Claude Code | Estimated | Latest assistant usage under `.claude/projects`, conservatively using a 200k window |
+| Cursor | Activity only | `workspaceStorage/state.vscdb` modification time; the message database is never opened |
 
-## Automatic collection and pressure model
+Providers poll every five seconds. Directory inventories refresh at most every 30 seconds and only
+the final 512 KB of active logs is read. When several sessions are active, the highest context
+pressure wins and its metric quality remains visible.
 
-After startup, Pressure Lens watches `%USERPROFILE%\.codex\sessions`:
+## Stable black-hole semantics
 
-- It checks for recently active Codex sessions every two seconds.
-- Context usage is calculated from
-  `last_token_usage.total_tokens / model_context_window`.
-- When several sessions are active, the session with the highest context usage
-  drives Agent pressure while the dashboard reports the active-session count.
-- If the newest JSONL line is still being written, the last complete metric is
-  retained.
-- Unchanged files reuse an in-memory cache instead of being scanned again.
+The transparent WebGL2 shader adapts Schwarzschild photon paths, a thin accretion disk, temperature
+gradients, and relativistic beaming from the MIT-licensed
+[`s0xDk/ghostty-blackhole`](https://github.com/s0xDk/ghostty-blackhole). See
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
-The pressure score also considers typing intensity, modifier-key ratio,
-application switching, continuous work time, Agent context usage, active
-Agents, and recent failures. Other Agents can be added through the same local
-adapter boundary. Without structured token metrics, only process activity can
-be detected reliably.
+The black hole always flows, drifts, and rotates, but shapes have stable meaning:
+
+- `calm`: an open, face-on ring;
+- `focused`: a tighter edge-on disk;
+- `overloaded`: hotter and wider Quasar/Blazar forms;
+- `uncertain`: Pure Lens when confidence is low or collection is paused.
+
+Transitions are smooth. Decorative shape touring is off by default; when enabled it remains inside
+the current semantic family.
 
 ## Privacy boundaries
 
-- Typed characters, window titles, and clipboard content are never stored.
-- Virtual key codes are counted only in memory; SQLite receives aggregated
-  numbers.
-- The Codex collector parses structured events such as `token_count`; it does
-  not store, display, or analyze conversation content.
-- Desktop lensing captures only the overlay-sized region beneath the floating
-  window, at about 12 FPS. Frames remain in memory, are never uploaded, and do
-  not affect the pressure score.
-- Lensing is paused and cleared while dragging. Only frames from the new
-  position are accepted after release, with a short fade-in to hide stale
-  samples.
-- The overlay is excluded from Windows screen capture to avoid recursive
-  mirroring.
-- The lens texture is feathered at all edges; there is no full-desktop
-  translucent layer.
-- Aggregated data is stored only in a local SQLite database by default.
-- The locked black hole is click-through and receives pointer input only in
-  move mode.
+- The keyboard hook increments counters and discards the virtual key before the callback ends.
+- Window titles, clipboard data, and typed characters are never read.
+- SQLite stores only minute aggregates, self-reports, settings, and runtime state.
+- Lensing captures only the 420×420 region under the overlay. It is compressed in memory, never
+  written or uploaded, and never enters the pressure model.
+- Capture pauses and clears during drag; late frames from the old position are rejected.
+- The overlay is excluded from Windows capture and feathered on every edge; there is no
+  full-desktop translucent layer.
+- Pausing freezes the last reading and lowers confidence instead of pretending pressure is zero.
+
+## Performance
+
+Performance is a release gate. Balanced mode is capped at 20 FPS, 1 FPS lens capture, 1.35 DPR,
+and 40 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture.
+
+Validated full-process-tree results (Rust, two WebViews, and GPU):
+
+| Metric | v0.2.0 observed | CI gate |
+| --- | ---: | ---: |
+| Normalized CPU | 1.11–2.64% | ≤ 3% |
+| Peak private memory | 340.38–351.06 MB | ≤ 450 MB |
+| Peak working set | 585.92–602.24 MB | ≤ 700 MB |
+| 30-second private-memory change | -4.05–1.13 MB | growth ≤ 30 MB |
+
+The earlier raw-frame implementation reached about 3.33 GB of private memory. v0.2.0 uses
+compressed frame IPC, a fixed buffer, explicit `ImageBitmap.close()`, in-place texture updates, and
+consumer backpressure. See [docs/performance-budget.md](./docs/performance-budget.md).
 
 ## Interaction
 
-- Closing the dashboard hides it in the system tray without stopping
-  collection.
-- The tray menu opens the dashboard, toggles the black hole, starts move mode,
-  or exits the app.
-- Press `Ctrl + Alt + M` to unlock move mode. Releasing a drag automatically
-  locks the overlay and remembers its position.
-- You can also hover over the black-hole center for two seconds. Once the
-  gravity charge ring completes, hold and drag the black hole. The overlay
-  remains click-through during the countdown.
+- Closing the dashboard hides it to the tray without stopping collection.
+- The tray opens the dashboard, toggles the overlay, enters move mode, or quits.
+- Press `Ctrl + Alt + M`, or hover over the black-hole center for two seconds, then hold and drag.
+- Releasing restores click-through behavior and transactionally stores the position.
 
-## Architecture
+## Install and run
 
-| Layer | Technology | Responsibility |
-| --- | --- | --- |
-| Desktop shell | Rust + Tauri 2 | Windows, tray, shortcuts, local storage, and OS collection |
-| Dashboard | HTML + CSS + JavaScript | Pressure explanation, trends, and visibility controls |
-| Desktop black hole | WebGL2 + GLSL | Rendering, morphing, and desktop lensing |
-| Data | SQLite | Local storage for aggregated metrics only |
-
-## Requirements
-
-- Windows 10 or Windows 11
-- Stable Rust with the MSVC toolchain
-- Microsoft Edge WebView2 Runtime
-
-The frontend has no Node.js build step.
-
-## Run locally
+Requirements: Windows 10/11 and Microsoft Edge WebView2 Runtime.
 
 ```powershell
 git clone git@github.com:yuzhiyang1/pressure-lens.git
@@ -116,31 +101,55 @@ cd pressure-lens\src-tauri
 cargo run
 ```
 
-Build a release executable:
+Build an NSIS installer:
 
 ```powershell
-cd src-tauri
-cargo build --release
+cd pressure-lens
+npx --yes @tauri-apps/cli@latest build --bundles nsis
 ```
 
-The executable is written to
-`src-tauri/target/release/pressure-lens.exe`.
+The installer is written under `src-tauri/target/release/bundle/nsis/`.
 
 ## Verification
 
 ```powershell
+npm ci
+npm test
+
 cd src-tauri
+cargo fmt -- --check
+cargo clippy --all-targets -- -D warnings
 cargo test
+cargo build --release
 
 cd ..
-node --test tests/backdrop-capture-gate.test.cjs
+.\scripts\windows-native-smoke.ps1 `
+  -Executable .\src-tauri\target\release\pressure-lens.exe
+.\scripts\measure-performance.ps1 `
+  -Executable .\src-tauri\target\release\pressure-lens.exe
 ```
 
-The second command requires Node.js only for the frontend regression test; it
-is not required to build the application.
+CI runs Rust checks, frontend unit tests, real-Chrome E2E, native single-instance/logging smoke, and
+the full-process-tree performance gate.
+
+## Signing, updates, and releases
+
+The release workflow requires two signatures:
+
+1. a Tauri Updater private key signs update artifacts and its public key is embedded in the app;
+2. a trusted Windows code-signing certificate signs and timestamps the EXE and NSIS installer.
+
+Required repository configuration:
+
+- variable: `PRESSURE_LENS_UPDATER_PUBKEY`
+- secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- secrets: `WINDOWS_CERTIFICATE` (Base64 PFX), `WINDOWS_CERTIFICATE_PASSWORD`
+
+The workflow fails closed if any value is missing, so it cannot publish an unsigned installer. A
+local acceptance bundle does not claim publisher trust; a certificate owner must configure the
+production credentials.
 
 ## License
 
-No project-wide open-source license has been declared yet. Third-party code
-remains subject to its original license. See
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+No project-wide open-source license has been declared. Third-party code remains under its original
+license; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

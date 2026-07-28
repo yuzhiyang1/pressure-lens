@@ -1,4 +1,4 @@
-use crate::model::{ActivitySample, PressureLevel, PressureReading};
+use crate::model::{ActivitySample, ConfidenceLevel, PressureLevel, PressureReading, VisualState};
 
 /// 根据可解释规则计算认知负荷。每一项先归一化，最终分数限制在 0..100。
 pub fn calculate_pressure(sample: &ActivitySample) -> PressureReading {
@@ -58,8 +58,15 @@ pub fn calculate_pressure(sample: &ActivitySample) -> PressureReading {
 
     PressureReading {
         score: round_one_decimal(score),
+        raw_score: round_one_decimal(score),
         level,
         reasons,
+        confidence: 0.0,
+        confidence_level: ConfidenceLevel::Low,
+        calibration_adjustment: 0.0,
+        calibration_reports: 0,
+        visual_state: VisualState::Uncertain,
+        advice: None,
     }
 }
 

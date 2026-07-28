@@ -29,6 +29,10 @@
         </div>
 
         <div class="header-actions">
+          <nav class="view-switcher" aria-label="页面">
+            <button class="is-active" data-view="dashboard-view" type="button">仪表盘</button>
+            <button data-view="settings-view" type="button">设置</button>
+          </nav>
           <div class="privacy">
             <span class="privacy-dot" aria-hidden="true"></span>
             本地运行 · 不记录字符内容
@@ -39,6 +43,9 @@
         </div>
       </header>
 
+      <div class="recovery-banner" id="recovery-banner" role="status" hidden></div>
+
+      <div class="app-view is-active" id="dashboard-view">
       <!-- 主视觉与桌面覆盖层共用同一个 WebGL Shader。 -->
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
@@ -152,6 +159,77 @@
         </aside>
       </section>
 
+      <section class="confidence-grid" aria-labelledby="confidence-title">
+        <article class="confidence-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">ASSESSMENT QUALITY / 03</p>
+              <h2 id="confidence-title">这次判断有多可信</h2>
+            </div>
+            <strong id="confidence-value">--%</strong>
+          </div>
+          <div class="confidence-track" aria-hidden="true"><span id="confidence-bar"></span></div>
+          <p id="confidence-detail">正在等待滚动窗口和数据源建立覆盖。</p>
+          <small id="calibration-detail">尚未形成个人校准</small>
+        </article>
+
+        <article class="health-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">SOURCE HEALTH / 04</p>
+              <h2>数据源健康</h2>
+            </div>
+            <span class="panel-status" id="health-overview">初始化中</span>
+          </div>
+          <ul id="source-health" class="health-list"></ul>
+        </article>
+      </section>
+
+      <section class="history-panel" aria-labelledby="history-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">TODAY / JOURNAL</p>
+            <h2 id="history-title">真正的今日历史</h2>
+          </div>
+          <span class="panel-status" id="history-coverage">0 分钟覆盖</span>
+        </div>
+        <div class="history-chart-wrap">
+          <svg
+            id="history-chart"
+            viewBox="0 0 1000 200"
+            role="img"
+            aria-label="今天每分钟的压力变化"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="history-fill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ff6b35" stop-opacity=".45"></stop>
+                <stop offset="100%" stop-color="#ff6b35" stop-opacity="0"></stop>
+              </linearGradient>
+            </defs>
+            <path id="history-area" fill="url(#history-fill)"></path>
+            <path id="history-line" fill="none" stroke="#ff7a3d" stroke-width="3"></path>
+          </svg>
+          <p id="history-empty">第一条完整分钟样本写入后，这里会出现真实曲线。</p>
+        </div>
+        <div class="summary-grid">
+          <div><span>平均压力</span><strong id="summary-average">--</strong></div>
+          <div><span>今日峰值</span><strong id="summary-peak">--</strong></div>
+          <div><span>高压分钟</span><strong id="summary-high">0</strong></div>
+          <div><span>自评次数</span><strong id="summary-reports">0</strong></div>
+        </div>
+        <p class="summary-headline" id="summary-headline">正在建立今天的总结。</p>
+      </section>
+
+      <section class="advice-panel" id="advice-panel" aria-labelledby="advice-title" hidden>
+        <div>
+          <p class="eyebrow">NEXT RECOVERY ACTION</p>
+          <h2 id="advice-title">先停一下</h2>
+          <p id="advice-detail"></p>
+        </div>
+        <button id="start-recovery" type="button">开始恢复计时</button>
+      </section>
+
       <section class="agent-source" aria-labelledby="agent-source-title">
         <div class="agent-source-copy">
           <span class="auto-pill">
@@ -168,14 +246,110 @@
           <small id="agent-token-detail">等待第一条上下文指标</small>
         </div>
       </section>
+      </div>
+
+      <section class="app-view settings-view" id="settings-view" aria-labelledby="settings-title" hidden>
+        <div class="settings-heading">
+          <p class="eyebrow">LOCAL CONTROLS</p>
+          <h1 id="settings-title">性能、安静与隐私，都由你决定。</h1>
+          <p>所有设置只保存在本机；关闭一个数据源后，对应采集回调会立即停止计数。</p>
+        </div>
+
+        <form id="settings-form" class="settings-form">
+          <fieldset>
+            <legend>资源与视觉</legend>
+            <label>
+              <span>性能档位<small>平衡档默认限制为 20 FPS、1 FPS 折射采样</small></span>
+              <select id="performance-mode">
+                <option value="eco">节能 · 12 FPS</option>
+                <option value="balanced">平衡 · 20 FPS</option>
+                <option value="vivid">视觉优先 · 30 FPS</option>
+              </select>
+            </label>
+            <label>
+              <span>动画强度 <output id="animation-output">65%</output></span>
+              <input id="animation-intensity" type="range" min="0" max="100" step="5" />
+            </label>
+            <label>
+              <span>桌面折射强度 <output id="lens-output">55%</output></span>
+              <input id="lens-intensity" type="range" min="0" max="100" step="5" />
+            </label>
+            <label class="toggle-row">
+              <span>装饰形态巡游<small>关闭时，形态只表达平稳 / 专注 / 过载</small></span>
+              <input id="decorative-shape-tour" type="checkbox" />
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>采集与隐私</legend>
+            <label class="toggle-row is-critical">
+              <span>暂停全部压力采集<small>冻结最后判断，不会伪装成低压力</small></span>
+              <input id="collection-paused" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>键盘节奏<small>只计数，不记录字符</small></span>
+              <input id="collect-keyboard" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>应用切换<small>不读取窗口标题</small></span>
+              <input id="collect-app-switches" type="checkbox" />
+            </label>
+            <label class="toggle-row">
+              <span>Agent Provider<small>Codex 精确、Claude 估算、Cursor 仅活跃状态</small></span>
+              <input id="collect-agents" type="checkbox" />
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>安静时段与保留</legend>
+            <label class="toggle-row">
+              <span>启用安静时段<small>停止覆盖层动画和桌面捕获，采集仍按上方设置执行</small></span>
+              <input id="quiet-enabled" type="checkbox" />
+            </label>
+            <div class="time-grid">
+              <label><span>开始</span><input id="quiet-start" type="time" /></label>
+              <label><span>结束</span><input id="quiet-end" type="time" /></label>
+            </div>
+            <label>
+              <span>历史保留天数</span>
+              <input id="retention-days" type="number" min="1" max="365" />
+            </label>
+            <label class="toggle-row">
+              <span>开机启动</span>
+              <input id="launch-at-startup" type="checkbox" />
+            </label>
+          </fieldset>
+
+          <div class="settings-actions">
+            <button class="primary-action" type="submit">保存设置</button>
+            <span id="settings-status">尚未修改</span>
+            <button class="secondary-action" id="check-update" type="button">检查更新</button>
+            <span id="update-status">当前版本由签名更新源维护</span>
+          </div>
+        </form>
+
+        <section class="danger-zone" aria-labelledby="danger-title">
+          <div>
+            <p class="eyebrow">LOCAL DATA</p>
+            <h2 id="danger-title">清理本地历史</h2>
+            <p>设置会保留；只删除聚合分钟样本和自评。</p>
+          </div>
+          <div>
+            <button id="clear-today" type="button">清除今天</button>
+            <button id="clear-all" type="button">清除全部历史</button>
+          </div>
+        </section>
+      </section>
 
       <footer class="local-footer">
-        <span>PRESSURE LENS / WINDOWS MVP</span>
+        <span>PRESSURE LENS / WINDOWS 0.2</span>
         <span>SQLite · WebGL2 · Local only</span>
       </footer>
     </main>
 
-    <script src="./blackhole-renderer.js?v=10"></script>
-    <script src="./app.js?v=6"></script>
+    <script src="./resource-policy.js?v=2"></script>
+    <script src="./visual-policy.js?v=3"></script>
+    <script src="./blackhole-renderer.js?v=15"></script>
+    <script src="./app.js?v=7"></script>
   </body>
 </html>

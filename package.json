@@ -1,0 +1,14 @@
+{
+  "name": "pressure-lens-quality",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "test:unit": "node --test tests/*.test.cjs",
+    "test:e2e": "playwright test",
+    "test": "npm run test:unit && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.54.1",
+    "http-server": "14.1.1"
+  }
+}

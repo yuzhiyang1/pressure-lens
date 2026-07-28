@@ -54,6 +54,6 @@ fn build_icon() -> Vec<u8> {
             output.extend_from_slice(&[blue, green, red, alpha]);
         }
     }
-    output.extend_from_slice(&vec![0; MASK_BYTES]);
+    output.extend_from_slice(&[0; MASK_BYTES]);
     output
 }
