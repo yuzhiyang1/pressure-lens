@@ -54,9 +54,11 @@ test("低压悬浮黑洞保持桌面可读尺寸与完整流光", async ({ page 
     };
   }, canvasPng.toString("base64"));
 
-  // 420px 悬浮窗中至少保留约 2/3 宽度给黑洞本体，避免流光挤成棕色小球。
-  expect(metrics.width).toBeGreaterThanOrEqual(270);
-  expect(metrics.height).toBeGreaterThanOrEqual(180);
+  // 悬浮黑洞需要比最初的小球清晰，但不能接近 300px 后持续遮挡桌面内容。
+  expect(metrics.width).toBeGreaterThanOrEqual(230);
+  expect(metrics.width).toBeLessThanOrEqual(265);
+  expect(metrics.height).toBeGreaterThanOrEqual(145);
+  expect(metrics.height).toBeLessThanOrEqual(175);
   expect(metrics.peakBrightness).toBeGreaterThanOrEqual(220);
   // 仍保留透明安全区，宽形态和局部折射不能露出方形窗口边界。
   expect(metrics.minimumX).toBeGreaterThanOrEqual(28);

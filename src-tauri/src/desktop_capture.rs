@@ -7,9 +7,15 @@ use std::{
 };
 
 #[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleDC, CreateDIBSection,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, ReleaseDC, SRCCOPY, SelectObject,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
 };
 
 pub struct DesktopFrame {
@@ -24,6 +30,35 @@ pub struct CaptureRect {
     y: i32,
     width: u32,
     height: u32,
+}
+
+#[cfg(target_os = "windows")]
+struct CaptureExclusionGuard {
+    window: HWND,
+}
+
+#[cfg(target_os = "windows")]
+impl CaptureExclusionGuard {
+    fn enable(window_handle: usize) -> Result<Self, String> {
+        let window = window_handle as HWND;
+        // 仅在内部 BitBlt 的极短窗口内排除悬浮窗，避免把上一帧黑洞递归采回折射纹理。
+        let changed = unsafe { SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE) };
+        if changed == 0 {
+            return Err("无法在桌面采样期间排除悬浮窗".to_string());
+        }
+        Ok(Self { window })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for CaptureExclusionGuard {
+    fn drop(&mut self) {
+        // 抓取结束立即恢复，用户日常截图和录屏仍然能够看到悬浮黑洞。
+        let restored = unsafe { SetWindowDisplayAffinity(self.window, WDA_NONE) };
+        if restored == 0 {
+            log::warn!("桌面采样结束后未能恢复悬浮窗截图状态");
+        }
+    }
 }
 
 impl CaptureRect {
@@ -132,6 +167,18 @@ pub fn capture(rect: CaptureRect) -> Result<DesktopFrame, String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub fn capture_behind_window(
+    rect: CaptureRect,
+    window_handle: usize,
+) -> Result<DesktopFrame, String> {
+    let exclusion = CaptureExclusionGuard::enable(window_handle)?;
+    let frame = capture(rect);
+    // JPEG 压缩不需要继续排除窗口，尽量缩短对其他截图工具的影响时间。
+    drop(exclusion);
+    frame
+}
+
 impl DesktopFrame {
     pub fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Result<Self, String> {
         let expected_len = (width as usize)
@@ -172,6 +219,53 @@ impl DesktopFrame {
 #[cfg(test)]
 mod tests {
     use super::DesktopFrame;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn capture_exclusion_is_restored_after_the_guard_is_dropped() {
+        use std::ptr::{null, null_mut};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, GetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+            WDA_NONE, WS_OVERLAPPED,
+        };
+
+        // 复用 Windows 自带的 STATIC 窗口类，测试真实 display-affinity API，而不是模拟状态。
+        let class_name: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let window = unsafe {
+            CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                null(),
+                WS_OVERLAPPED,
+                0,
+                0,
+                32,
+                32,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null(),
+            )
+        };
+        assert!(!window.is_null());
+
+        {
+            let _guard =
+                super::CaptureExclusionGuard::enable(window as usize).expect("应能排除自有窗口");
+            let mut affinity = WDA_NONE;
+            let read = unsafe { GetWindowDisplayAffinity(window, &mut affinity) };
+            assert_ne!(read, 0);
+            assert_eq!(affinity, WDA_EXCLUDEFROMCAPTURE);
+        }
+
+        let mut restored_affinity = WDA_EXCLUDEFROMCAPTURE;
+        let read = unsafe { GetWindowDisplayAffinity(window, &mut restored_affinity) };
+        assert_ne!(read, 0);
+        assert_eq!(restored_affinity, WDA_NONE);
+        unsafe {
+            DestroyWindow(window);
+        }
+    }
 
     #[test]
     fn windows_bgra_pixels_are_converted_to_opaque_rgba() {
