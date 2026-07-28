@@ -9,6 +9,7 @@ precision highp float;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform float uPressure;
+uniform float uPresentationScale;
 uniform int uShapeFrom;
 uniform int uShapeTo;
 uniform float uShapeBlend;
@@ -191,7 +192,14 @@ void main() {
         + 0.015 * sin(uTime * 0.13 + 1.3);
     vec2 position = rotate2(roll) * (screen - drift);
     // 高压以盘面温度和宽度表达，不再把视觉面积放大到接近窗口边缘。
-    float shadowRadius = mix(0.082, 0.130, eased);
+    // 小型桌面悬浮窗需要更大的低压展示尺度，否则同一组流光会被压进过少像素。
+    // 高压形态本身已经更宽，逐步收回放大倍率以保留透明安全区。
+    float presentationScale = mix(
+        uPresentationScale,
+        min(uPresentationScale, 1.18),
+        eased
+    );
+    float shadowRadius = mix(0.082, 0.130, eased) * presentationScale;
     float worldScale = B_CRIT / shadowRadius;
     vec2 rayPlane = position * worldScale;
     float impact = length(rayPlane);

@@ -275,6 +275,8 @@ window.PressureBlackHole
     resourceMode: "balanced",
     // 保留超采样意图，但最终 DPR、光线步数和帧率都由用户选择的性能档封顶。
     supersample: 1.75,
+    // 420px 悬浮窗使用独立展示尺度，让流光拥有与仪表盘接近的实际像素面积。
+    presentationScale: 1.6,
     animationIntensity: currentSettings.animation_intensity,
     lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
     decorativeShapeTour: currentSettings.decorative_shape_tour,
