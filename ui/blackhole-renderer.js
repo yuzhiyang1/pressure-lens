@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=11").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=12").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
@@ -80,6 +80,7 @@
     const resolutionUniform = gl.getUniformLocation(program, "uResolution");
     const timeUniform = gl.getUniformLocation(program, "uTime");
     const pressureUniform = gl.getUniformLocation(program, "uPressure");
+    const presentationScaleUniform = gl.getUniformLocation(program, "uPresentationScale");
     const shapeFromUniform = gl.getUniformLocation(program, "uShapeFrom");
     const shapeToUniform = gl.getUniformLocation(program, "uShapeTo");
     const shapeBlendUniform = gl.getUniformLocation(program, "uShapeBlend");
@@ -576,6 +577,10 @@
       gl.uniform2f(resolutionUniform, width, height);
       gl.uniform1f(timeUniform, options.timeOverride ?? animationPhase);
       gl.uniform1f(pressureUniform, renderedPressure);
+      gl.uniform1f(
+        presentationScaleUniform,
+        clamp(Number(options.presentationScale) || 1, 1, 1.6),
+      );
       gl.uniform1i(shapeFromUniform, shapeFrom);
       gl.uniform1i(shapeToUniform, shapeTo);
       gl.uniform1f(shapeBlendUniform, shapeBlend);
