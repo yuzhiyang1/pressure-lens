@@ -57,7 +57,8 @@ test("高压状态展示可信度、真实历史和恢复动作", async ({ page 
   }));
   expect(canvasSize.width).toBeGreaterThan(0);
   expect(canvasSize.height).toBeGreaterThan(0);
-  expect(canvasSize.dpr).toBeCloseTo(1.5, 2);
+  // 仪表盘与悬浮层共用同一采样基线，避免两处材质锐度不一致。
+  expect(canvasSize.dpr).toBeCloseTo(1.75, 2);
   expect(canvasSize).toMatchObject({
     raySteps: 52,
     framesPerSecond: 15,

@@ -177,15 +177,15 @@ void main() {
         smoothstep(0.0, 1.0, uShapeBlend)
     );
 
-    // 低压力只保留 1–3px 呼吸，高压力也限制在约 10px，避免常驻窗口抢注意力。
+    // 低压力也保留可辨认的小范围漂移；压力只扩大活动范围，不把黑洞冻结。
     vec2 wander = mix(
         lissajous(uTime * 0.55),
         lissajous(uTime * 1.15),
         eased
     );
-    vec2 drift = wander * mix(0.004, 0.019, eased);
+    vec2 drift = wander * mix(0.009, 0.019, eased);
     drift += vec2(cos(uTime * 0.80), sin(uTime * 1.00))
-        * mix(0.001, 0.005, eased);
+        * mix(0.006, 0.010, eased);
     float roll = look.roll
         + uRotationPhase
         + 0.04 * sin(uTime * 0.047)
@@ -354,8 +354,8 @@ void main() {
     // 折射只覆盖事件视界附近的局部圆域，避免 420px 透明窗口的物理边界露出来。
     float lensRadius = length(lensPosition);
     float localLensOuter = min(
-        max(shadowRadius * 2.20, 0.22),
-        0.34
+        max(shadowRadius * 2.80, 0.30),
+        0.38
     );
     float localLensWindow = 1.0 - smoothstep(
         shadowRadius * 0.86,
@@ -381,11 +381,21 @@ void main() {
     );
     float lightBackdrop = uBackdropReady
         * smoothstep(0.58, 0.88, backdropLuminance);
-    // 浅色桌面降低盘面白度并增加暖色密度，同一形态不会被背景洗成半透明白雾。
-    vec3 adaptiveForeground = mix(
-        color,
-        color * 0.56 + vec3(0.12, 0.038, 0.008),
-        lightBackdrop * 0.72
+    // 背景只影响折射底图，不能改写黑洞前景材质；否则同一压力会在白底变成灰棕色。
+    // 暗场只托住事件视界和实际发光像素，不再形成一整块可见的灰色圆形蒙层。
+    float horizonSupport = 1.0 - smoothstep(
+        shadowRadius * 0.86,
+        shadowRadius * 1.45,
+        lensRadius
+    );
+    float materialSupport = max(
+        horizonSupport,
+        smoothstep(0.008, 0.18, alpha)
+    );
+    vec3 groundedBackdrop = backdrop * mix(
+        1.0,
+        0.02,
+        lightBackdrop * localLensWindow * materialSupport * 0.92
     );
 
     // WebView 本身仍是 420×420 的透明窗口。让所有图层在四条物理边界前羽化，
@@ -396,11 +406,7 @@ void main() {
         min(edgeUv.y, 1.0 - edgeUv.y)
     );
     float edgeFeather = smoothstep(0.012, 0.105, edgeDistance);
-    float foregroundAlpha = clamp(
-        alpha * edgeFeather * mix(1.0, 1.22, lightBackdrop),
-        0.0,
-        1.0
-    );
+    float foregroundAlpha = clamp(alpha * edgeFeather, 0.0, 1.0);
 
     // 将折射桌面作为黑洞与吸积盘背后的图层；径向与四边同时渐隐。
     float backdropAlpha = uBackdropReady
@@ -412,8 +418,8 @@ void main() {
         discard;
     }
     vec3 finalColor = (
-        adaptiveForeground * foregroundAlpha
-        + backdrop * backdropAlpha * (1.0 - foregroundAlpha)
+        color * foregroundAlpha
+        + groundedBackdrop * backdropAlpha * (1.0 - foregroundAlpha)
     ) / max(finalAlpha, 0.0001);
 
     fragColor = vec4(finalColor, finalAlpha);

@@ -45,8 +45,8 @@
   }
 
   function motionScale(reduceMotion, pressure = 1) {
-    const pressureScale = 0.12 + visualPressure(pressure) * 0.88;
-    // 低压仍有呼吸感；系统减少动画会在压力速度之上继续降速。
+    const pressureScale = 0.45 + visualPressure(pressure) * 0.55;
+    // 低压保持可辨认的盘面流动；系统减少动画只继续降速，不把时间相位冻结。
     return pressureScale * (reduceMotion ? 0.18 : 1);
   }
 
