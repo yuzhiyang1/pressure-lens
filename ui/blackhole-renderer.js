@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=10").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=11").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
@@ -110,9 +110,13 @@
 
     const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const startedAt = performance.now();
-    let renderedPressure = clamp(Number(readPressure()) || 0, 0, 1);
+    const initialPressure = clamp(Number(readPressure()) || 0, 0, 1);
+    let renderedPressure = window.PressureVisuals.visualPressure(initialPressure);
     let previousFrameAt = 0;
     let semanticState = String(options.readVisualState?.() ?? "uncertain");
+    let pressureStateController = semanticState === "uncertain"
+      ? null
+      : window.PressureVisuals.createPressureStateController(semanticState);
     let shapeFrom = window.PressureVisuals.primaryShape(semanticState);
     let shapeTo = shapeFrom;
     let shapeBlend = 1;
@@ -223,6 +227,11 @@
     let captureTimer = null;
     let captureInFlight = false;
     let captureUrgent = false;
+    let backdropResumeTimer = null;
+    const backdropSettleMilliseconds = Math.max(
+      0,
+      Number(options.backdropSettleMilliseconds) || 140,
+    );
     const captureInterval = () => 1000 / resourcePolicy.backdropFramesPerSecond;
     const canCapture = () =>
       Boolean(captureGate)
@@ -312,6 +321,10 @@
       if (!captureGate) {
         return;
       }
+      if (backdropResumeTimer !== null) {
+        window.clearTimeout(backdropResumeTimer);
+        backdropResumeTimer = null;
+      }
       captureGate.suspend();
       captureUrgent = false;
       if (captureTimer !== null) {
@@ -338,6 +351,27 @@
       }
     };
 
+    const prepareForDrag = async () => {
+      // 原生窗口拖动会阻塞 WebView 帧循环，因此按下前同步清空旧坐标纹理。
+      suspendBackdrop();
+    };
+
+    const resumeAfterDrag = () => new Promise((resolve) => {
+      if (!captureGate || disposed) {
+        resolve();
+        return;
+      }
+      if (backdropResumeTimer !== null) {
+        window.clearTimeout(backdropResumeTimer);
+      }
+      // 等待 Windows 完成窗口落位，再从新坐标采样，避免把拖动末帧带到新位置。
+      backdropResumeTimer = window.setTimeout(() => {
+        backdropResumeTimer = null;
+        resumeBackdrop();
+        resolve();
+      }, backdropSettleMilliseconds);
+    });
+
     const requestRender = () => {
       if (disposed || !lifecycle.visible || lifecycle.paused || renderRequest !== null) {
         return;
@@ -359,7 +393,13 @@
       const elapsedSeconds = Math.min(wallElapsedSeconds, 0.1);
       previousFrameAt = now;
       // Windows“减少动画”只降低运动幅度，不把黑洞冻结成静态图。
-      const motionScale = window.PressureVisuals.motionScale(reduceMotion);
+      const targetPressure = clamp(Number(readPressure()) || 0, 0, 1);
+      const targetVisualPressure =
+        window.PressureVisuals.visualPressure(targetPressure);
+      const motionScale = window.PressureVisuals.motionScale(
+        reduceMotion,
+        targetPressure,
+      );
       animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
       // 形态巡游不再绑定纹理流速，避免默认 0.65 强度或系统减少动画让形态长时间不变。
       shapeTourElapsed = Math.max(0, (now - startedAt) / 1000);
@@ -385,11 +425,26 @@
       }
       canvas.dataset.renderDpr = dpr.toFixed(3);
 
-      // 指数平滑让实时压力变化有重量感，同时避免突然放大造成视觉打扰。
-      const targetPressure = clamp(Number(readPressure()) || 0, 0, 1);
-      renderedPressure += (targetPressure - renderedPressure) * 0.055;
+      // 使用时间常数而不是“每帧比例”，性能档位变化不会改变黑洞响应速度。
+      const pressureTimeConstant = targetVisualPressure >= renderedPressure ? 5 : 15;
+      const pressureBlend = 1 - Math.exp(-elapsedSeconds / pressureTimeConstant);
+      renderedPressure += (targetVisualPressure - renderedPressure) * pressureBlend;
+      canvas.dataset.visualPressure = renderedPressure.toFixed(3);
       // 关闭巡游时由压力语义决定形态；开启后以当前语义形态为起点巡游六种造型。
-      const nextSemanticState = String(options.readVisualState?.() ?? "uncertain");
+      const observedSemanticState =
+        String(options.readVisualState?.() ?? "uncertain");
+      if (
+        pressureStateController === null
+        && observedSemanticState !== "uncertain"
+      ) {
+        // 首次真实快照应立即采用，迟滞只约束后续波动，不能让启动状态等待几十秒。
+        pressureStateController =
+          window.PressureVisuals.createPressureStateController(observedSemanticState);
+      }
+      const nextSemanticState = pressureStateController
+        ? pressureStateController.update(targetPressure, now)
+        : "uncertain";
+      canvas.dataset.semanticState = nextSemanticState;
       const family = resourcePolicy.decorativeShapeTour
         ? window.PressureVisuals.tourFor(nextSemanticState)
         : window.PressureVisuals.familyFor(nextSemanticState);
@@ -422,17 +477,18 @@
         // 系统减少动画时拉长形变过程，避免瞬切，也不会让巡游等待一分钟才发生。
         shapeBlend = Math.min(
           1,
-          shapeTransitionElapsed / (reduceMotion ? 4 : 2),
+          shapeTransitionElapsed / (reduceMotion ? 4 : 3),
         );
       }
       canvas.dataset.shapeFrom = String(shapeFrom);
       canvas.dataset.shapeTo = String(shapeTo);
       if (resourcePolicy.animationIntensity > 0) {
         // 旋转相位独立累计，压力只改变当下速度，不会因 pressure * time 突然跳角度。
+        // 低压维持约 0.45°/秒，高压逐步提升；不再让正常工作态持续抢注意力。
         const rotationRate =
-          (0.045 + 0.070 * renderedPressure)
+          (0.012 + 0.052 * renderedPressure)
           * resourcePolicy.animationIntensity
-          * motionScale;
+          * (reduceMotion ? 0.18 : 1);
         rotationPhase = (rotationPhase + elapsedSeconds * rotationRate) % (Math.PI * 2);
       }
       gl.clearColor(0, 0, 0, 0);
@@ -580,6 +636,10 @@
     const dispose = () => {
       disposed = true;
       suspendBackdrop();
+      if (backdropResumeTimer !== null) {
+        window.clearTimeout(backdropResumeTimer);
+        backdropResumeTimer = null;
+      }
       if (renderRequest !== null) {
         cancelAnimationFrame(renderRequest);
         renderRequest = null;
@@ -591,6 +651,8 @@
 
     requestRender();
     return Object.freeze({
+      prepareForDrag,
+      resumeAfterDrag,
       suspendBackdrop,
       resumeBackdrop,
       setVisible,
@@ -601,6 +663,8 @@
         ...diagnostics,
         animationPhase,
         rotationPhase,
+        backdropSuspended: Boolean(captureGate?.isSuspended()),
+        backdropVisibility,
       }),
     });
   }

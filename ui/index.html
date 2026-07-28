@@ -9,7 +9,7 @@
     />
     <title>Pressure Lens · 本地认知负荷</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=2" />
+    <link rel="stylesheet" href="./styles.css?v=3" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -51,15 +51,11 @@
         <div class="hero-copy">
           <p class="eyebrow">
             <span class="live-dot" aria-hidden="true"></span>
-            TODAY / LIVE SIGNAL
+            NOW / LIVE SIGNAL
           </p>
-          <h1 id="hero-title">
-            看见负荷，
-            <span>在它吞没你之前。</span>
-          </h1>
+          <h1 id="hero-title">此刻的认知负荷</h1>
           <p class="lede">
-            键盘节奏、应用切换与 Agent 上下文都留在本机，
-            汇成一个可以被理解、也可以被校准的实时信号。
+            先看现在多少、为什么，再决定是否需要停一下。
           </p>
 
           <div class="score-readout">
@@ -74,6 +70,46 @@
           </div>
           <div class="pressure-track" aria-hidden="true">
             <span></span>
+          </div>
+
+          <!-- 首屏决策区聚合“为什么、怎么办、我的感受”，避免用户向下寻找答案。 -->
+          <div class="decision-overview" id="decision-overview">
+            <section class="signal-panel" aria-labelledby="reasons-title">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">WHY THIS SCORE</p>
+                  <h2 id="reasons-title">主要原因</h2>
+                </div>
+                <span class="panel-status">实时解释</span>
+              </div>
+              <ul id="reasons" aria-live="polite">
+                <li>等待第一分钟聚合数据</li>
+              </ul>
+            </section>
+
+            <section class="advice-panel" id="advice-panel" aria-labelledby="advice-title" hidden>
+              <div>
+                <p class="eyebrow">NEXT ACTION</p>
+                <h2 id="advice-title">先停一下</h2>
+                <p id="advice-detail"></p>
+              </div>
+              <button id="start-recovery" type="button">开始恢复计时</button>
+            </section>
+
+            <aside class="calibrate" aria-labelledby="calibrate-title">
+              <div class="calibrate-copy">
+                <p class="eyebrow">QUICK CALIBRATION</p>
+                <h2 id="calibrate-title">你现在的真实感受</h2>
+                <small id="report-status">一次点击就能修正今天的判断。</small>
+              </div>
+              <div class="buttons" id="self-report" aria-label="自评当前压力">
+                <button data-value="1" type="button">轻松</button>
+                <button data-value="2" type="button">平稳</button>
+                <button data-value="3" type="button">紧绷</button>
+                <button data-value="4" type="button">很高</button>
+                <button data-value="5" type="button">过载</button>
+              </div>
+            </aside>
           </div>
         </div>
 
@@ -126,37 +162,6 @@
             <small id="switches">0 次应用切换</small>
           </article>
         </div>
-      </section>
-
-      <section class="insight-grid">
-        <article class="signal-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">WHY THIS SCORE / 01</p>
-              <h2>当前主要信号</h2>
-            </div>
-            <span class="panel-status">实时解释</span>
-          </div>
-          <ul id="reasons">
-            <li>等待第一分钟聚合数据</li>
-          </ul>
-        </article>
-
-        <aside class="calibrate" aria-labelledby="calibrate-title">
-          <p class="eyebrow">HUMAN CALIBRATION / 02</p>
-          <h2 id="calibrate-title">此刻你的真实压力是？</h2>
-          <p class="calibrate-copy">
-            你的感受优先于算法。一次点击就能修正今天的判断。
-          </p>
-          <div class="buttons" id="self-report">
-            <button data-value="1" type="button">轻松</button>
-            <button data-value="2" type="button">平稳</button>
-            <button data-value="3" type="button">紧绷</button>
-            <button data-value="4" type="button">很高</button>
-            <button data-value="5" type="button">过载</button>
-          </div>
-          <small id="report-status">每天几次轻量反馈，会让判断更懂你。</small>
-        </aside>
       </section>
 
       <section class="confidence-grid" aria-labelledby="confidence-title">
@@ -221,15 +226,6 @@
         <p class="summary-headline" id="summary-headline">正在建立今天的总结。</p>
       </section>
 
-      <section class="advice-panel" id="advice-panel" aria-labelledby="advice-title" hidden>
-        <div>
-          <p class="eyebrow">NEXT RECOVERY ACTION</p>
-          <h2 id="advice-title">先停一下</h2>
-          <p id="advice-detail"></p>
-        </div>
-        <button id="start-recovery" type="button">开始恢复计时</button>
-      </section>
-
       <section class="agent-source" aria-labelledby="agent-source-title">
         <div class="agent-source-copy">
           <span class="auto-pill">
@@ -249,10 +245,42 @@
       </div>
 
       <section class="app-view settings-view" id="settings-view" aria-labelledby="settings-title" hidden>
-        <div class="settings-heading">
-          <p class="eyebrow">LOCAL CONTROLS</p>
-          <h1 id="settings-title">性能、安静与隐私，都由你决定。</h1>
-          <p>所有设置只保存在本机；关闭一个数据源后，对应采集回调会立即停止计数。</p>
+        <div class="settings-intro">
+          <div class="settings-heading">
+            <p class="eyebrow">LOCAL CONTROLS</p>
+            <h1 id="settings-title">性能、安静与隐私，都由你决定。</h1>
+            <p>所有设置只保存在本机；关闭一个数据源后，对应采集回调会立即停止计数。</p>
+          </div>
+
+          <!-- 预览与真实仪表盘复用渲染器，切换背景即可发现浅色桌面上的可见性问题。 -->
+          <section class="settings-preview" aria-labelledby="settings-preview-title">
+            <div class="settings-preview-heading">
+              <div>
+                <p class="eyebrow">DESKTOP PREVIEW</p>
+                <h2 id="settings-preview-title">实时预览桌面效果</h2>
+              </div>
+              <span id="settings-preview-status" aria-live="polite">深色桌面 · 设置会即时反映</span>
+            </div>
+            <figure
+              class="settings-preview-stage"
+              id="settings-preview-stage"
+              data-preview-background="dark"
+            >
+              <div class="preview-desktop-chrome" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <canvas
+                id="settings-blackhole-preview"
+                aria-label="当前视觉设置下的桌面黑洞预览"
+              ></canvas>
+              <figcaption>预览压力 <strong id="settings-preview-score">--</strong></figcaption>
+            </figure>
+            <div class="preview-background-switcher" aria-label="预览桌面背景">
+              <button type="button" data-preview-background="dark" aria-pressed="true">深色桌面</button>
+              <button type="button" data-preview-background="light" aria-pressed="false">浅色桌面</button>
+              <button type="button" data-preview-background="complex" aria-pressed="false">复杂桌面</button>
+            </div>
+          </section>
         </div>
 
         <form id="settings-form" class="settings-form">
@@ -261,7 +289,7 @@
             <label>
               <span>性能档位<small>平衡档默认限制为 15 FPS、1 FPS 折射采样</small></span>
               <select id="performance-mode">
-                <option value="eco">节能 · 12 FPS</option>
+                <option value="eco">节能 · 10 FPS</option>
                 <option value="balanced">平衡 · 15 FPS</option>
                 <option value="vivid">视觉优先 · 30 FPS</option>
               </select>
@@ -347,9 +375,9 @@
       </footer>
     </main>
 
-    <script src="./resource-policy.js?v=5"></script>
-    <script src="./visual-policy.js?v=5"></script>
-    <script src="./blackhole-renderer.js?v=21"></script>
-    <script src="./app.js?v=9"></script>
+    <script src="./resource-policy.js?v=6"></script>
+    <script src="./visual-policy.js?v=6"></script>
+    <script src="./blackhole-renderer.js?v=22"></script>
+    <script src="./app.js?v=10"></script>
   </body>
 </html>

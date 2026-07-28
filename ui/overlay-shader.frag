@@ -176,21 +176,22 @@ void main() {
         smoothstep(0.0, 1.0, uShapeBlend)
     );
 
-    // 低压力也保持可察觉的非重复漂移，高压力扩大范围并叠加快速微摆。
+    // 低压力只保留 1–3px 呼吸，高压力也限制在约 10px，避免常驻窗口抢注意力。
     vec2 wander = mix(
         lissajous(uTime * 0.55),
         lissajous(uTime * 1.15),
         eased
     );
-    vec2 drift = wander * mix(0.014, 0.046, eased);
+    vec2 drift = wander * mix(0.004, 0.019, eased);
     drift += vec2(cos(uTime * 0.80), sin(uTime * 1.00))
-        * mix(0.004, 0.014, eased);
+        * mix(0.001, 0.005, eased);
     float roll = look.roll
         + uRotationPhase
         + 0.04 * sin(uTime * 0.047)
         + 0.015 * sin(uTime * 0.13 + 1.3);
     vec2 position = rotate2(roll) * (screen - drift);
-    float shadowRadius = mix(0.082, 0.174, eased);
+    // 高压以盘面温度和宽度表达，不再把视觉面积放大到接近窗口边缘。
+    float shadowRadius = mix(0.082, 0.130, eased);
     float worldScale = B_CRIT / shadowRadius;
     vec2 rayPlane = position * worldScale;
     float impact = length(rayPlane);
@@ -342,13 +343,19 @@ void main() {
     vec2 radialDirection = length(lensPosition) > 0.0001
         ? normalize(lensPosition)
         : vec2(0.0);
-    float lensWindow = 1.0 - smoothstep(
-        B_CRIT * 0.90,
-        traceLimit * 0.96,
-        impact
+    // 折射只覆盖事件视界附近的局部圆域，避免 420px 透明窗口的物理边界露出来。
+    float lensRadius = length(lensPosition);
+    float localLensOuter = min(
+        max(shadowRadius * 2.20, 0.22),
+        0.34
+    );
+    float localLensWindow = 1.0 - smoothstep(
+        shadowRadius * 0.86,
+        localLensOuter,
+        lensRadius
     );
     float bendProfile = exp(-abs(impact - B_CRIT) * 0.46);
-    float bendStrength = lensWindow
+    float bendStrength = localLensWindow
         * bendProfile
         * mix(0.030, 0.058, eased)
         * clamp(uLensStrength, 0.0, 1.0);
@@ -360,6 +367,18 @@ void main() {
         uBackdrop,
         clamp(backdropUv + backdropOffset, vec2(0.002), vec2(0.998))
     ).rgb;
+    float backdropLuminance = dot(
+        backdrop,
+        vec3(0.2126, 0.7152, 0.0722)
+    );
+    float lightBackdrop = uBackdropReady
+        * smoothstep(0.58, 0.88, backdropLuminance);
+    // 浅色桌面降低盘面白度并增加暖色密度，同一形态不会被背景洗成半透明白雾。
+    vec3 adaptiveForeground = mix(
+        color,
+        color * 0.56 + vec3(0.12, 0.038, 0.008),
+        lightBackdrop * 0.72
+    );
 
     // WebView 本身仍是 420×420 的透明窗口。让所有图层在四条物理边界前羽化，
     // 避免宽盘或高压力折射触及窗口边缘时露出一条笔直的截图接缝。
@@ -369,16 +388,23 @@ void main() {
         min(edgeUv.y, 1.0 - edgeUv.y)
     );
     float edgeFeather = smoothstep(0.012, 0.105, edgeDistance);
-    float foregroundAlpha = alpha * edgeFeather;
+    float foregroundAlpha = clamp(
+        alpha * edgeFeather * mix(1.0, 1.22, lightBackdrop),
+        0.0,
+        1.0
+    );
 
     // 将折射桌面作为黑洞与吸积盘背后的图层；径向与四边同时渐隐。
-    float backdropAlpha = uBackdropReady * lensWindow * edgeFeather * 0.985;
+    float backdropAlpha = uBackdropReady
+        * localLensWindow
+        * edgeFeather
+        * 0.985;
     float finalAlpha = foregroundAlpha + backdropAlpha * (1.0 - foregroundAlpha);
     if (finalAlpha < 0.006) {
         discard;
     }
     vec3 finalColor = (
-        color * foregroundAlpha
+        adaptiveForeground * foregroundAlpha
         + backdrop * backdropAlpha * (1.0 - foregroundAlpha)
     ) / max(finalAlpha, 0.0001);
 

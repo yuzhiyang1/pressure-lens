@@ -1,6 +1,11 @@
 const { test, expect } = require("@playwright/test");
 
-test("13 分桌面黑洞保持低压形态并使用高质量渲染", async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  // GitHub Runner 通过 SwiftShader 软件渲染，缩小画布可避免高质量 shader 阻塞测试线程。
+  await page.setViewportSize({ width: 360, height: 240 });
+});
+
+test("13 分桌面黑洞保持低压形态并使用平衡档渲染预算", async ({ page }) => {
   await page.goto("/overlay.html?preview=0.13");
 
   await expect.poll(async () => (
@@ -14,7 +19,7 @@ test("13 分桌面黑洞保持低压形态并使用高质量渲染", async ({ pa
     }))
   )).toEqual({
     dpr: 1.75,
-    raySteps: 56,
+    raySteps: 52,
     framesPerSecond: 15,
     tourEnabled: "false",
     tourSize: 2,

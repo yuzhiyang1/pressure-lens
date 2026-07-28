@@ -62,14 +62,15 @@ through all six forms, so shape no longer represents pressure alone.
 - Lensing captures only the 420×420 region under the overlay. It is compressed in memory, never
   written or uploaded, and never enters the pressure model.
 - Capture pauses and clears during drag; late frames from the old position are rejected.
-- The overlay is excluded from Windows capture and feathered on every edge; there is no
-  full-desktop translucent layer.
+- The overlay remains visible in ordinary system screenshots for recording and feedback. Lensing
+  stays inside a locally feathered window; there is no full-desktop translucent layer.
 - Pausing freezes the last reading and lowers confidence instead of pretending pressure is zero.
 
 ## Performance
 
-Performance is a release gate. Balanced mode is capped at 15 FPS and 1 FPS lens capture, while the desktop black hole keeps up to 2.5 DPR
-spatial supersampling and 56 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture.
+Performance is a release gate. Balanced mode is capped at 15 FPS, 1 FPS lens capture, 2 DPR, and
+52 ray-marching steps. Hidden overlays and quiet hours stop rendering and capture. Only vivid mode
+raises the limits to 30 FPS, 2.5 DPR, and 56 steps.
 
 Validated full-process-tree results (Rust, two WebViews, and GPU):
 
@@ -81,6 +82,10 @@ Validated full-process-tree results (Rust, two WebViews, and GPU):
 | Peak private memory | 340.38–351.06 MB | ≤ 450 MB |
 | Peak working set | 585.92–602.24 MB | ≤ 700 MB |
 | 30-second private-memory change | -4.05–1.13 MB | growth ≤ 30 MB |
+
+An additional Release run with the current visual policy on 2026-07-28 measured 1.04% CPU,
+384.91 MB peak private memory, 625.59 MB peak working set, and -6.12 MB private-memory change over
+30 seconds, passing every gate.
 
 The earlier raw-frame implementation reached about 3.33 GB of private memory. v0.2.0 uses
 compressed frame IPC, a fixed buffer, explicit `ImageBitmap.close()`, in-place texture updates, and
