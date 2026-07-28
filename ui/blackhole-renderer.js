@@ -359,7 +359,12 @@
       animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
 
       // DPR、帧率和光线步数都由统一资源策略限制，避免视觉参数绕过性能预算。
-      const dpr = Math.min(window.devicePixelRatio || 1, resourcePolicy.maximumDpr);
+      // 桌面悬浮层可要求最低超采样倍率，旋转时的细密流光不会退化成摩尔纹。
+      const minimumDpr = clamp(Number(options.minimumDpr) || 1, 1, 2);
+      const dpr = Math.min(
+        Math.max(window.devicePixelRatio || 1, minimumDpr),
+        resourcePolicy.maximumDpr,
+      );
       const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
       const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
       if (canvas.width !== width || canvas.height !== height) {

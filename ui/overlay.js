@@ -218,6 +218,7 @@ setInterval(refreshOverlay, 10_000);
 window.PressureBlackHole
   .start(canvas, () => targetPressure, {
     resourceMode: "balanced",
+    minimumDpr: 1.5,
     animationIntensity: currentSettings.animation_intensity,
     lensIntensity: desktopRefractionEnabled ? currentSettings.lens_intensity : 0,
     decorativeShapeTour: currentSettings.decorative_shape_tour,

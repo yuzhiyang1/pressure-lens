@@ -11,7 +11,7 @@
     }),
     balanced: Object.freeze({
       framesPerSecond: 20,
-      maximumDpr: 1.35,
+      maximumDpr: 1.5,
       raySteps: 40,
       backdropFramesPerSecond: 1,
     }),
