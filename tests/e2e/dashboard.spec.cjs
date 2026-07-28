@@ -83,7 +83,10 @@ test("设置页可暂停采集并保留隐私开关", async ({ page }) => {
 });
 
 test("设置页可在三种桌面背景实时预览黑洞", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto("/index.html?preview=55");
+  // 先让仪表盘控制器完成初始化，再切页，验证两个渲染器不会争抢首帧。
+  await expect(page.locator("#orbit")).toHaveClass(/is-ready/);
   await page.getByRole("button", { name: "设置" }).click();
 
   await expect(page.getByRole("heading", { name: "实时预览桌面效果" })).toBeVisible();

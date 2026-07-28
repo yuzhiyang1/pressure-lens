@@ -315,7 +315,8 @@ function ensureSettingsPreviewRenderer() {
       {
         // 预览复用同一 Shader 与压力语义，但只在设置页可见时运行，避免增加常驻开销。
         resourceMode: currentSettings?.performance_mode ?? "balanced",
-        supersample: 1.25,
+        // 设置卡片只负责预览材质与动态，不承担桌面悬浮窗的抗锯齿质量门禁。
+        supersample: 1,
         animationIntensity: currentSettings?.animation_intensity ?? defaultSettings.animation_intensity,
         lensIntensity: currentSettings?.lens_intensity ?? defaultSettings.lens_intensity,
         decorativeShapeTour: currentSettings?.decorative_shape_tour ?? false,
