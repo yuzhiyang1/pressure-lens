@@ -127,6 +127,9 @@ test("旋转到任意角度时吸积盘边缘仍保持连续覆盖", async ({ pa
 });
 
 test("长时间常驻后吸积盘不会退化成像素砂点", async ({ page }) => {
+  // Windows Runner 使用 SwiftShader 连续渲染四个长时间相位，保留与多角度扫描
+  // 相同的 90 秒预算；这只放宽执行时间，不降低颗粒度门禁。
+  test.setTimeout(90_000);
   const times = [2, 3_600, 20_000, 86_400];
   const samples = [];
   for (const time of times) {
