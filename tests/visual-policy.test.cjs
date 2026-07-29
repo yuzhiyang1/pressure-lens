@@ -45,6 +45,7 @@ test("低压黑洞保持轻微流动，但明显慢于高压状态", () => {
 
   assert.ok(zeroPressureMotion > 0);
   assert.equal(lowPressureMotion, zeroPressureMotion);
+  assert.ok(lowPressureMotion >= 0.4);
   assert.ok(lowPressureMotion < highPressureMotion);
   assert.equal(visualPolicy.motionScale(false, 1), 1);
 });

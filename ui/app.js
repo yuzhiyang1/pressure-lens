@@ -696,9 +696,7 @@ window.PressureBlackHole
     document.querySelector("#dashboard-blackhole"),
     () => dashboardPressure,
     {
-      // 超采样仍受性能档位的 DPR 与光线步数上限约束，避免设置形同虚设。
       resourceMode: "balanced",
-      supersample: 1.5,
       animationIntensity: defaultSettings.animation_intensity,
       lensIntensity: 0,
       shapeOverride,

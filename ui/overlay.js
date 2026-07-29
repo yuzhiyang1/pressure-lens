@@ -273,8 +273,6 @@ setInterval(refreshOverlay, 10_000);
 window.PressureBlackHole
   .start(canvas, () => targetPressure, {
     resourceMode: "balanced",
-    // 保留超采样意图，但最终 DPR、光线步数和帧率都由用户选择的性能档封顶。
-    supersample: 1.75,
     // 在首版小球和上一版过大黑洞之间取中间尺度，保留纹理但减少桌面遮挡。
     presentationScale: 1.35,
     animationIntensity: currentSettings.animation_intensity,
@@ -289,6 +287,9 @@ window.PressureBlackHole
           ? async () => createPreviewBackdrop()
           : undefined
       : undefined,
+    // 桌面端在当前位置缓存一帧，拖动落位后再刷新；静止时不周期切换
+    // Windows 捕获排除状态，因此黑洞持续旋转时也不会整窗闪烁。
+    continuousBackdropCapture: !invoke,
     onBackdropReady: (diagnostics) => {
       lensStatus.textContent = "桌面折射";
       lensStatus.setAttribute(

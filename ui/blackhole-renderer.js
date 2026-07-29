@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=12").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=17").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
@@ -143,6 +143,9 @@
     const captureGate = typeof options.readBackdrop === "function"
       ? new window.PressureBackdrop.BackdropCaptureGate()
       : null;
+    // Windows 桌面截图需要短暂排除悬浮窗。桌面端使用单帧缓存，避免静止时
+    // 周期切换窗口捕获状态；浏览器合成预览仍可选择连续刷新。
+    const continuousBackdropCapture = options.continuousBackdropCapture !== false;
 
     const decodeBackdrop = async (payload) => {
       let bytes;
@@ -277,7 +280,7 @@
         }
       } finally {
         captureInFlight = false;
-        if (canCapture()) {
+        if (canCapture() && (captureUrgent || continuousBackdropCapture)) {
           const delay = captureUrgent ? 0 : captureInterval();
           captureUrgent = false;
           scheduleBackdropCapture(delay);
@@ -339,7 +342,21 @@
       if (!captureGate || !window.PressureResources.captureEnabled(resourcePolicy, lifecycle)) {
         return;
       }
+      const wasSuspended = captureGate.isSuspended();
       captureGate.resume();
+      // 设置更新不应清空仍有效的当前位置纹理，也不应额外触发一次 Windows 截图。
+      // 只有首次启动、暂停恢复或拖动落位后才需要重新建立单帧背景。
+      if (
+        !wasSuspended
+        && (
+          backdropReady
+          || pendingBackdrop !== null
+          || captureInFlight
+          || captureTimer !== null
+        )
+      ) {
+        return;
+      }
       clearBackdropTexture();
       captureUrgent = true;
       if (captureTimer !== null) {
@@ -391,7 +408,11 @@
       const wallElapsedSeconds = previousFrameAt === 0
         ? frameInterval / 1000
         : (now - previousFrameAt) / 1000;
-      const elapsedSeconds = Math.min(wallElapsedSeconds, 0.1);
+      // Ghostty Blackhole 直接使用持续推进的 iTime。运动相位也必须累计完整墙钟时间，
+      // 否则 WebView 掉帧或 GPU 忙碌时会把大部分时间截掉，看起来像停止旋转和移动。
+      const motionElapsedSeconds = wallElapsedSeconds;
+      // 压力平滑和纹理淡入仍限制单步跨度，避免休眠恢复后状态或透明度瞬跳。
+      const simulationElapsedSeconds = Math.min(wallElapsedSeconds, 0.1);
       previousFrameAt = now;
       // Windows“减少动画”只降低运动幅度，不把黑洞冻结成静态图。
       const targetPressure = clamp(Number(readPressure()) || 0, 0, 1);
@@ -401,13 +422,14 @@
         reduceMotion,
         targetPressure,
       );
-      animationPhase += elapsedSeconds * resourcePolicy.animationIntensity * motionScale;
+      animationPhase +=
+        motionElapsedSeconds * resourcePolicy.animationIntensity * motionScale;
       // 形态巡游不再绑定纹理流速，避免默认 0.65 强度或系统减少动画让形态长时间不变。
       shapeTourElapsed = Math.max(0, (now - startedAt) / 1000);
 
-      // 仪表盘沿用资源策略；桌面悬浮层可恢复第一版的独立超采样。
-      // 这样只增加 420×420 覆盖层的 GPU 清晰度，不提高后台采集频率和主界面开销。
-      const supersample = clamp(Number(options.supersample) || 1, 1, 2);
+      // 仪表盘和桌面悬浮层共用同一采样基线，避免同一 Shader 因入口参数不同
+      // 出现一边平滑、一边锯齿的回归；性能档仍会通过 maximumDpr 封顶。
+      const supersample = clamp(Number(options.supersample) || 1.75, 1, 2);
       const maximumDpr = clamp(
         Number(options.maximumDpr) || resourcePolicy.maximumDpr,
         1,
@@ -428,7 +450,8 @@
 
       // 使用时间常数而不是“每帧比例”，性能档位变化不会改变黑洞响应速度。
       const pressureTimeConstant = targetVisualPressure >= renderedPressure ? 5 : 15;
-      const pressureBlend = 1 - Math.exp(-elapsedSeconds / pressureTimeConstant);
+      const pressureBlend =
+        1 - Math.exp(-simulationElapsedSeconds / pressureTimeConstant);
       renderedPressure += (targetVisualPressure - renderedPressure) * pressureBlend;
       canvas.dataset.visualPressure = renderedPressure.toFixed(3);
       // 关闭巡游时由压力语义决定形态；开启后以当前语义形态为起点巡游六种造型。
@@ -474,7 +497,7 @@
         shapeTo = (shapeFrom + 1) % 7;
         shapeBlend = options.shapeOverride - shapeFrom;
       } else if (shapeBlend < 1) {
-        shapeTransitionElapsed += elapsedSeconds;
+        shapeTransitionElapsed += motionElapsedSeconds;
         // 系统减少动画时拉长形变过程，避免瞬切，也不会让巡游等待一分钟才发生。
         shapeBlend = Math.min(
           1,
@@ -485,12 +508,13 @@
       canvas.dataset.shapeTo = String(shapeTo);
       if (resourcePolicy.animationIntensity > 0) {
         // 旋转相位独立累计，压力只改变当下速度，不会因 pressure * time 突然跳角度。
-        // 低压维持约 0.45°/秒，高压逐步提升；不再让正常工作态持续抢注意力。
+        // 低压维持约 1.9°/秒，确保非圆形盘面可辨认地旋转；高压再逐步提升。
         const rotationRate =
-          (0.012 + 0.052 * renderedPressure)
+          (0.045 + 0.045 * renderedPressure)
           * resourcePolicy.animationIntensity
           * (reduceMotion ? 0.18 : 1);
-        rotationPhase = (rotationPhase + elapsedSeconds * rotationRate) % (Math.PI * 2);
+        rotationPhase =
+          (rotationPhase + motionElapsedSeconds * rotationRate) % (Math.PI * 2);
       }
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -559,8 +583,12 @@
         backdropFrame.bitmap?.close();
         pendingBackdrop = null;
         backdropReady = true;
-        // 只有纹理已消费后才安排下一帧，避免 IPC 比渲染器更快时形成隐形队列。
-        scheduleBackdropCapture(captureInterval());
+        // 浏览器合成预览可以连续更新；Windows 桌面端保留当前位置单帧，
+        // 防止 SetWindowDisplayAffinity 的周期切换造成整窗闪烁。
+        if (continuousBackdropCapture) {
+          // 只有纹理已消费后才安排下一帧，避免 IPC 比渲染器更快时形成隐形队列。
+          scheduleBackdropCapture(captureInterval());
+        }
         if (wasWaitingForFreshFrame) {
           backdropDiagnosticsPending = false;
           options.onBackdropReady?.({
@@ -602,7 +630,7 @@
         // 新位置首帧到达后约 120ms 淡入，隐藏纹理恢复时的硬切。
         backdropVisibility = Math.min(
           1,
-          backdropVisibility + elapsedSeconds / 0.12,
+          backdropVisibility + simulationElapsedSeconds / 0.12,
         );
       }
       gl.uniform1f(backdropReadyUniform, backdropVisibility);
@@ -612,6 +640,8 @@
     const setVisible = (visible) => {
       lifecycle.visible = Boolean(visible);
       if (!lifecycle.visible) {
+        // 隐藏期间不累计运动时间；恢复后的首帧从当前时刻重新建立时间基准。
+        previousFrameAt = 0;
         suspendBackdrop();
         if (renderRequest !== null) {
           cancelAnimationFrame(renderRequest);
@@ -619,6 +649,7 @@
         }
         return;
       }
+      previousFrameAt = 0;
       resumeBackdrop();
       requestRender();
     };
@@ -670,6 +701,7 @@
         rotationPhase,
         backdropSuspended: Boolean(captureGate?.isSuspended()),
         backdropVisibility,
+        continuousBackdropCapture,
       }),
     });
   }

@@ -55,31 +55,38 @@ float diskTexture(
     float radius,
     float turns,
     float time,
-    float speed,
     float wind,
     float contrast,
     float projectedPixelFootprint
 ) {
-    float spiral = radius * wind - time * speed / max(pow(radius, 1.5), 1.0);
+    // Ghostty 通过角向噪声表现盘面流动。桌面常驻应用不能把 time / r^1.5
+    // 永久累加进径向相位：运行数小时后它会把宽流光剪切成亚像素砂点。
+    // 这里仍按原作的整圈 9/19 周期平移，但每转一圈精确回绕，时间再大也不会
+    // 增加空间频率；回绕量正好等于噪声周期，因此视觉上没有跳帧。
+    float orbitalTurns = fract(time * 0.075);
+    float animatedTurns = turns - orbitalTurns;
+    float spiral = radius * wind * 0.12;
     // 角向格点按完整圈数包裹，避免正视形态在 atan 分支处出现水平接缝。
-    float a = noiseWrapY(
-        vec2(radius * 2.6, turns * 21.0 + spiral * 4.0),
-        21.0
+    // 与 Ghostty Blackhole 保持同一组宽纹理频率；过高的 43 圈细层在侧视旋转时
+    // 会压进单个屏幕像素，产生点阵和摩尔纹。
+    float coarse = noiseWrapY(
+        vec2(radius * 1.0, animatedTurns * 9.0 + spiral * 1.5 + 7.0),
+        9.0
     );
-    float b = noiseWrapY(
-        vec2(radius * 5.4 + 7.0, turns * 43.0 + spiral * 7.0),
-        43.0
+    float detail = noiseWrapY(
+        vec2(radius * 2.8, animatedTurns * 19.0 + spiral * 3.0),
+        19.0
     );
     // 侧视盘会把几十条角向细纹压进一个屏幕像素。继续提高 DPR 只能延后摩尔纹，
     // 这里按投影后的像素足迹逐级收掉不可分辨的细层，保留可见的宽流光。
-    float coarseRate = projectedPixelFootprint * (2.6 + 4.0 * abs(wind));
-    float fineRate = projectedPixelFootprint * (5.4 + 7.0 * abs(wind));
-    float coarseVisibility = 1.0 - smoothstep(0.32, 0.95, coarseRate);
-    float fineVisibility = 1.0 - smoothstep(0.18, 0.62, fineRate);
-    float filteredA = mix(0.5, a, coarseVisibility);
-    float filteredB = mix(filteredA, b, fineVisibility);
+    float coarseRate = projectedPixelFootprint * (1.0 + 1.5 * abs(wind));
+    float detailRate = projectedPixelFootprint * (2.8 + 3.0 * abs(wind));
+    float coarseVisibility = 1.0 - smoothstep(0.48, 1.10, coarseRate);
+    float detailVisibility = 1.0 - smoothstep(0.24, 0.72, detailRate);
+    float filteredCoarse = mix(0.5, coarse, coarseVisibility);
+    float filteredDetail = mix(filteredCoarse, detail, detailVisibility);
     float threads = pow(
-        clamp(filteredA * 0.76 + filteredB * 0.24, 0.0, 1.0),
+        clamp(filteredCoarse * 0.35 + filteredDetail * 0.65, 0.0, 1.0),
         max(contrast, 0.35)
     );
     return 0.24 + 1.55 * threads;
@@ -111,37 +118,36 @@ struct DiskLook {
     float opacity;
     float contrast;
     float wind;
-    float speed;
     float temperature;
 };
 
 DiskLook lookAt(int index) {
     if (index == 1) {
         // Gargantua：接近侧视，盘面收紧，轮廓更克制。
-        return DiskLook(1.54, 0.04, 2.15, 6.8, 1.45, 0.52, 1.15, 0.70, 4.2, 0.16);
+        return DiskLook(1.54, 0.04, 2.15, 6.8, 1.45, 0.52, 1.15, 0.70, 0.16);
     }
     if (index == 2) {
         // M87* donut：大幅降低倾角，形成接近环状的吸积盘。
-        return DiskLook(0.58, -0.28, 2.25, 6.2, 1.38, 0.42, 0.95, 0.40, 2.7, 0.06);
+        return DiskLook(0.58, -0.28, 2.25, 6.2, 1.38, 0.42, 0.95, 0.40, 0.06);
     }
     if (index == 3) {
         // Face-on ember：近乎正视，外盘展开成宽阔圆环。
-        return DiskLook(0.26, 0.02, 2.75, 9.2, 1.16, 0.34, 1.75, 0.82, 4.5, 0.34);
+        return DiskLook(0.26, 0.02, 2.75, 9.2, 1.16, 0.34, 1.75, 0.82, 0.34);
     }
     if (index == 4) {
         // Quasar：更热、更宽、更偏斜，压力高时具有喷薄感。
-        return DiskLook(1.12, 0.50, 2.80, 10.5, 1.28, 0.30, 2.35, 1.05, 6.6, 0.92);
+        return DiskLook(1.12, 0.50, 2.80, 10.5, 1.28, 0.30, 2.35, 1.05, 0.92);
     }
     if (index == 5) {
         // Blazar：参考官方 Demo Tour 的高温、宽盘与更强束流感。
-        return DiskLook(1.05, 0.55, 3.00, 13.8, 1.05, 0.28, 2.55, 1.18, 7.2, 1.00);
+        return DiskLook(1.05, 0.55, 3.00, 13.8, 1.05, 0.28, 2.55, 1.18, 1.00);
     }
     if (index == 6) {
         // Pure lens：暂时隐去吸积盘，让桌面引力透镜本身成为主角。
-        return DiskLook(1.50, 0.35, 1.80, 8.0, 0.00, 0.00, 1.60, 0.72, 5.0, 0.28);
+        return DiskLook(1.50, 0.35, 1.80, 8.0, 0.00, 0.00, 1.60, 0.72, 0.28);
     }
     // Inferno：默认形态，也是循环首尾的稳定锚点。
-    return DiskLook(1.48, 0.25, 1.78, 7.8, 1.72, 0.56, 2.10, 0.72, 5.0, 0.28);
+    return DiskLook(1.48, 0.25, 1.78, 7.8, 1.72, 0.56, 2.10, 0.72, 0.28);
 }
 
 DiskLook mixLook(DiskLook from, DiskLook to, float amount) {
@@ -154,7 +160,6 @@ DiskLook mixLook(DiskLook from, DiskLook to, float amount) {
         mix(from.opacity, to.opacity, amount),
         mix(from.contrast, to.contrast, amount),
         mix(from.wind, to.wind, amount),
-        mix(from.speed, to.speed, amount),
         mix(from.temperature, to.temperature, amount)
     );
 }
@@ -177,15 +182,15 @@ void main() {
         smoothstep(0.0, 1.0, uShapeBlend)
     );
 
-    // 低压力只保留 1–3px 呼吸，高压力也限制在约 10px，避免常驻窗口抢注意力。
+    // 低压力也保留可辨认的小范围漂移；压力只扩大活动范围，不把黑洞冻结。
     vec2 wander = mix(
         lissajous(uTime * 0.55),
         lissajous(uTime * 1.15),
         eased
     );
-    vec2 drift = wander * mix(0.004, 0.019, eased);
+    vec2 drift = wander * mix(0.009, 0.019, eased);
     drift += vec2(cos(uTime * 0.80), sin(uTime * 1.00))
-        * mix(0.001, 0.005, eased);
+        * mix(0.006, 0.010, eased);
     float roll = look.roll
         + uRotationPhase
         + 0.04 * sin(uTime * 0.047)
@@ -272,12 +277,10 @@ void main() {
                     * (1.0 - smoothstep(diskOuter * 0.72, diskOuter, diskRadius));
                 float phi = atan(dot(diskPoint, diskAxisY), diskPoint.x);
                 float turns = phi / (2.0 * PI);
-                float localTime = sqrt(max(1.0 - 1.5 / diskRadius, 0.02));
                 float streak = diskTexture(
                     diskRadius,
                     turns,
-                    uTime * localTime * mix(0.42, 0.18, eased),
-                    look.speed,
+                    uTime,
                     look.wind,
                     look.contrast,
                     projectedPixelFootprint
@@ -313,16 +316,24 @@ void main() {
         previousPoint = point;
     }
 
-    // 临界冲量参数附近强化光子环，让边缘更接近原项目的锐亮轮廓。
-    // 光子环至少覆盖数个内部像素，透明桌面合成时不会退化成断续点线。
-    float photonRing = exp(-abs(impact - B_CRIT) * 12.0) * 0.18;
-    vec3 ringColor = mix(
-        vec3(1.0, 0.58, 0.24),
-        vec3(0.72, 0.86, 1.0),
-        look.temperature * 0.42
+    // 透明覆盖层不能依赖“某个像素刚好命中临界半径”。接近临界半径的光线会
+    // 绕行多圈，低能量盘面采样因此容易变成一圈离散棕点；只连续化这部分暗纹，
+    // 高亮盘面仍保留测地线积分产生的真实弧线。
+    float photonPixelWidth = max(fwidth(impact), 0.008);
+    float photonBand = (
+        1.0 - smoothstep(
+            0.0,
+            photonPixelWidth * 3.25,
+            abs(impact - B_CRIT)
+        )
     );
-    emitted += ringColor * photonRing;
-    opacity += photonRing * 0.42;
+    float emissionPeak = max(max(emitted.r, emitted.g), emitted.b);
+    float lowEnergyRing = photonBand
+        * (1.0 - smoothstep(0.65, 2.20, emissionPeak));
+    // Ghostty 本身没有额外绘制一圈光环。这里同样不“补亮”临界环，而是把积分
+    // 预算造成的暗色离散命中压回事件视界；真正明亮的盘面穿越不会被削弱。
+    emitted *= 1.0 - lowEnergyRing;
+    opacity *= 1.0 - lowEnergyRing * 0.86;
 
     if (!captured && opacity < 0.18) {
         vec2 starCell = floor(normalize(velocity).xy * 155.0);
@@ -337,9 +348,15 @@ void main() {
     vec3 color = vec3(1.0) - exp(-emitted * mix(1.24, 1.48, eased));
     float luminance = dot(color, vec3(0.2126, 0.7152, 0.0722));
     float alpha = clamp(max(opacity, luminance * 1.12), 0.0, 1.0);
-    if (captured) {
-        alpha = max(alpha, 0.985);
-    }
+    // Ghostty 输出整张不透明终端画面；透明 Tauri 窗口需要显式计算事件视界
+    // 的边缘覆盖率，否则 captured 的布尔跳变会直接暴露成锯齿圆周。
+    float horizonPixelWidth = max(fwidth(impact) * 1.35, 0.010);
+    float horizonCoverage = 1.0 - smoothstep(
+        B_CRIT - horizonPixelWidth,
+        B_CRIT + horizonPixelWidth,
+        impact
+    );
+    alpha = max(alpha, horizonCoverage * 0.985);
 
     // 采样悬浮窗下方的真实桌面，并按黑洞中心径向偏移纹理坐标。
     // 屏幕帧只作为这一帧的 GPU 纹理使用，不影响压力计算。
@@ -354,8 +371,8 @@ void main() {
     // 折射只覆盖事件视界附近的局部圆域，避免 420px 透明窗口的物理边界露出来。
     float lensRadius = length(lensPosition);
     float localLensOuter = min(
-        max(shadowRadius * 2.20, 0.22),
-        0.34
+        max(shadowRadius * 2.80, 0.30),
+        0.38
     );
     float localLensWindow = 1.0 - smoothstep(
         shadowRadius * 0.86,
@@ -381,11 +398,21 @@ void main() {
     );
     float lightBackdrop = uBackdropReady
         * smoothstep(0.58, 0.88, backdropLuminance);
-    // 浅色桌面降低盘面白度并增加暖色密度，同一形态不会被背景洗成半透明白雾。
-    vec3 adaptiveForeground = mix(
-        color,
-        color * 0.56 + vec3(0.12, 0.038, 0.008),
-        lightBackdrop * 0.72
+    // 背景只影响折射底图，不能改写黑洞前景材质；否则同一压力会在白底变成灰棕色。
+    // 暗场只托住事件视界和实际发光像素，不再形成一整块可见的灰色圆形蒙层。
+    float horizonSupport = 1.0 - smoothstep(
+        shadowRadius * 0.86,
+        shadowRadius * 1.45,
+        lensRadius
+    );
+    float materialSupport = max(
+        horizonSupport,
+        smoothstep(0.008, 0.18, alpha)
+    );
+    vec3 groundedBackdrop = backdrop * mix(
+        1.0,
+        0.02,
+        lightBackdrop * localLensWindow * materialSupport * 0.92
     );
 
     // WebView 本身仍是 420×420 的透明窗口。让所有图层在四条物理边界前羽化，
@@ -396,11 +423,7 @@ void main() {
         min(edgeUv.y, 1.0 - edgeUv.y)
     );
     float edgeFeather = smoothstep(0.012, 0.105, edgeDistance);
-    float foregroundAlpha = clamp(
-        alpha * edgeFeather * mix(1.0, 1.22, lightBackdrop),
-        0.0,
-        1.0
-    );
+    float foregroundAlpha = clamp(alpha * edgeFeather, 0.0, 1.0);
 
     // 将折射桌面作为黑洞与吸积盘背后的图层；径向与四边同时渐隐。
     float backdropAlpha = uBackdropReady
@@ -412,8 +435,8 @@ void main() {
         discard;
     }
     vec3 finalColor = (
-        adaptiveForeground * foregroundAlpha
-        + backdrop * backdropAlpha * (1.0 - foregroundAlpha)
+        color * foregroundAlpha
+        + groundedBackdrop * backdropAlpha * (1.0 - foregroundAlpha)
     ) / max(finalAlpha, 0.0001);
 
     fragColor = vec4(finalColor, finalAlpha);
