@@ -4,6 +4,51 @@ const { test, expect } = require("@playwright/test");
 // 同时避免高分辨率光线积分阻塞浏览器主线程。
 test.use({ viewport: { width: 360, height: 360 } });
 
+test("桌面单帧折射在静止期间不会周期重抓，落位后只刷新一次", async ({ page }) => {
+  await page.goto("/overlay.html?preview=0.2");
+
+  const captures = await page.evaluate(async () => {
+    const makeFrame = () => {
+      const payload = new Uint8Array(12);
+      const header = new DataView(payload.buffer);
+      header.setUint32(0, 1, true);
+      header.setUint32(4, 1, true);
+      payload.set([42, 88, 132, 255], 8);
+      return payload;
+    };
+    const canvas = document.createElement("canvas");
+    canvas.style.width = "16px";
+    canvas.style.height = "16px";
+    document.body.appendChild(canvas);
+
+    let captureCalls = 0;
+    const controller = await window.PressureBlackHole.start(canvas, () => 0.2, {
+      resourceMode: "vivid",
+      continuousBackdropCapture: false,
+      readBackdrop: async () => {
+        captureCalls += 1;
+        return makeFrame();
+      },
+    });
+
+    // vivid 档原本约每 333ms 重抓一次；等待 1.1s 足以稳定暴露周期刷新。
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const whileStationary = captureCalls;
+
+    await controller.prepareForDrag();
+    await controller.resumeAfterDrag();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const afterRelocation = captureCalls;
+
+    controller.dispose();
+    canvas.remove();
+    return { whileStationary, afterRelocation };
+  });
+
+  expect(captures.whileStationary).toBe(1);
+  expect(captures.afterRelocation).toBe(2);
+});
+
 test("静止时开启折射，拖动时关闭，落位后只从新位置恢复", async ({ page }) => {
   await page.goto("/overlay.html?backdrop=0.2");
   await expect(page.locator("#overlay-lens-status")).toHaveText("桌面折射");

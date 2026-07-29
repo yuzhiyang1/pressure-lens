@@ -55,21 +55,26 @@ float diskTexture(
     float radius,
     float turns,
     float time,
-    float speed,
     float wind,
     float contrast,
     float projectedPixelFootprint
 ) {
-    float spiral = radius * wind - time * speed / max(pow(radius, 1.5), 1.0);
+    // Ghostty 通过角向噪声表现盘面流动。桌面常驻应用不能把 time / r^1.5
+    // 永久累加进径向相位：运行数小时后它会把宽流光剪切成亚像素砂点。
+    // 这里仍按原作的整圈 9/19 周期平移，但每转一圈精确回绕，时间再大也不会
+    // 增加空间频率；回绕量正好等于噪声周期，因此视觉上没有跳帧。
+    float orbitalTurns = fract(time * 0.075);
+    float animatedTurns = turns - orbitalTurns;
+    float spiral = radius * wind * 0.12;
     // 角向格点按完整圈数包裹，避免正视形态在 atan 分支处出现水平接缝。
     // 与 Ghostty Blackhole 保持同一组宽纹理频率；过高的 43 圈细层在侧视旋转时
     // 会压进单个屏幕像素，产生点阵和摩尔纹。
     float coarse = noiseWrapY(
-        vec2(radius * 1.0, turns * 9.0 + spiral * 1.5 + 7.0),
+        vec2(radius * 1.0, animatedTurns * 9.0 + spiral * 1.5 + 7.0),
         9.0
     );
     float detail = noiseWrapY(
-        vec2(radius * 2.8, turns * 19.0 + spiral * 3.0),
+        vec2(radius * 2.8, animatedTurns * 19.0 + spiral * 3.0),
         19.0
     );
     // 侧视盘会把几十条角向细纹压进一个屏幕像素。继续提高 DPR 只能延后摩尔纹，
@@ -113,37 +118,36 @@ struct DiskLook {
     float opacity;
     float contrast;
     float wind;
-    float speed;
     float temperature;
 };
 
 DiskLook lookAt(int index) {
     if (index == 1) {
         // Gargantua：接近侧视，盘面收紧，轮廓更克制。
-        return DiskLook(1.54, 0.04, 2.15, 6.8, 1.45, 0.52, 1.15, 0.70, 4.2, 0.16);
+        return DiskLook(1.54, 0.04, 2.15, 6.8, 1.45, 0.52, 1.15, 0.70, 0.16);
     }
     if (index == 2) {
         // M87* donut：大幅降低倾角，形成接近环状的吸积盘。
-        return DiskLook(0.58, -0.28, 2.25, 6.2, 1.38, 0.42, 0.95, 0.40, 2.7, 0.06);
+        return DiskLook(0.58, -0.28, 2.25, 6.2, 1.38, 0.42, 0.95, 0.40, 0.06);
     }
     if (index == 3) {
         // Face-on ember：近乎正视，外盘展开成宽阔圆环。
-        return DiskLook(0.26, 0.02, 2.75, 9.2, 1.16, 0.34, 1.75, 0.82, 4.5, 0.34);
+        return DiskLook(0.26, 0.02, 2.75, 9.2, 1.16, 0.34, 1.75, 0.82, 0.34);
     }
     if (index == 4) {
         // Quasar：更热、更宽、更偏斜，压力高时具有喷薄感。
-        return DiskLook(1.12, 0.50, 2.80, 10.5, 1.28, 0.30, 2.35, 1.05, 6.6, 0.92);
+        return DiskLook(1.12, 0.50, 2.80, 10.5, 1.28, 0.30, 2.35, 1.05, 0.92);
     }
     if (index == 5) {
         // Blazar：参考官方 Demo Tour 的高温、宽盘与更强束流感。
-        return DiskLook(1.05, 0.55, 3.00, 13.8, 1.05, 0.28, 2.55, 1.18, 7.2, 1.00);
+        return DiskLook(1.05, 0.55, 3.00, 13.8, 1.05, 0.28, 2.55, 1.18, 1.00);
     }
     if (index == 6) {
         // Pure lens：暂时隐去吸积盘，让桌面引力透镜本身成为主角。
-        return DiskLook(1.50, 0.35, 1.80, 8.0, 0.00, 0.00, 1.60, 0.72, 5.0, 0.28);
+        return DiskLook(1.50, 0.35, 1.80, 8.0, 0.00, 0.00, 1.60, 0.72, 0.28);
     }
     // Inferno：默认形态，也是循环首尾的稳定锚点。
-    return DiskLook(1.48, 0.25, 1.78, 7.8, 1.72, 0.56, 2.10, 0.72, 5.0, 0.28);
+    return DiskLook(1.48, 0.25, 1.78, 7.8, 1.72, 0.56, 2.10, 0.72, 0.28);
 }
 
 DiskLook mixLook(DiskLook from, DiskLook to, float amount) {
@@ -156,7 +160,6 @@ DiskLook mixLook(DiskLook from, DiskLook to, float amount) {
         mix(from.opacity, to.opacity, amount),
         mix(from.contrast, to.contrast, amount),
         mix(from.wind, to.wind, amount),
-        mix(from.speed, to.speed, amount),
         mix(from.temperature, to.temperature, amount)
     );
 }
@@ -274,12 +277,10 @@ void main() {
                     * (1.0 - smoothstep(diskOuter * 0.72, diskOuter, diskRadius));
                 float phi = atan(dot(diskPoint, diskAxisY), diskPoint.x);
                 float turns = phi / (2.0 * PI);
-                float localTime = sqrt(max(1.0 - 1.5 / diskRadius, 0.02));
                 float streak = diskTexture(
                     diskRadius,
                     turns,
-                    uTime * localTime * mix(0.42, 0.18, eased),
-                    look.speed,
+                    uTime,
                     look.wind,
                     look.contrast,
                     projectedPixelFootprint

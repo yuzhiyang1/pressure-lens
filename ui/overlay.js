@@ -287,6 +287,9 @@ window.PressureBlackHole
           ? async () => createPreviewBackdrop()
           : undefined
       : undefined,
+    // 桌面端在当前位置缓存一帧，拖动落位后再刷新；静止时不周期切换
+    // Windows 捕获排除状态，因此黑洞持续旋转时也不会整窗闪烁。
+    continuousBackdropCapture: !invoke,
     onBackdropReady: (diagnostics) => {
       lensStatus.textContent = "桌面折射";
       lensStatus.setAttribute(

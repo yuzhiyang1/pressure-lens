@@ -40,7 +40,7 @@
         gl_Position = vec4(aPosition, 0.0, 1.0);
       }
     `;
-    const fragmentSource = await fetch("./overlay-shader.frag?v=16").then((response) => {
+    const fragmentSource = await fetch("./overlay-shader.frag?v=17").then((response) => {
       if (!response.ok) {
         throw new Error(`Shader 加载失败：${response.status}`);
       }
@@ -143,6 +143,9 @@
     const captureGate = typeof options.readBackdrop === "function"
       ? new window.PressureBackdrop.BackdropCaptureGate()
       : null;
+    // Windows 桌面截图需要短暂排除悬浮窗。桌面端使用单帧缓存，避免静止时
+    // 周期切换窗口捕获状态；浏览器合成预览仍可选择连续刷新。
+    const continuousBackdropCapture = options.continuousBackdropCapture !== false;
 
     const decodeBackdrop = async (payload) => {
       let bytes;
@@ -277,7 +280,7 @@
         }
       } finally {
         captureInFlight = false;
-        if (canCapture()) {
+        if (canCapture() && (captureUrgent || continuousBackdropCapture)) {
           const delay = captureUrgent ? 0 : captureInterval();
           captureUrgent = false;
           scheduleBackdropCapture(delay);
@@ -339,7 +342,21 @@
       if (!captureGate || !window.PressureResources.captureEnabled(resourcePolicy, lifecycle)) {
         return;
       }
+      const wasSuspended = captureGate.isSuspended();
       captureGate.resume();
+      // 设置更新不应清空仍有效的当前位置纹理，也不应额外触发一次 Windows 截图。
+      // 只有首次启动、暂停恢复或拖动落位后才需要重新建立单帧背景。
+      if (
+        !wasSuspended
+        && (
+          backdropReady
+          || pendingBackdrop !== null
+          || captureInFlight
+          || captureTimer !== null
+        )
+      ) {
+        return;
+      }
       clearBackdropTexture();
       captureUrgent = true;
       if (captureTimer !== null) {
@@ -566,8 +583,12 @@
         backdropFrame.bitmap?.close();
         pendingBackdrop = null;
         backdropReady = true;
-        // 只有纹理已消费后才安排下一帧，避免 IPC 比渲染器更快时形成隐形队列。
-        scheduleBackdropCapture(captureInterval());
+        // 浏览器合成预览可以连续更新；Windows 桌面端保留当前位置单帧，
+        // 防止 SetWindowDisplayAffinity 的周期切换造成整窗闪烁。
+        if (continuousBackdropCapture) {
+          // 只有纹理已消费后才安排下一帧，避免 IPC 比渲染器更快时形成隐形队列。
+          scheduleBackdropCapture(captureInterval());
+        }
         if (wasWaitingForFreshFrame) {
           backdropDiagnosticsPending = false;
           options.onBackdropReady?.({
@@ -680,6 +701,7 @@
         rotationPhase,
         backdropSuspended: Boolean(captureGate?.isSuspended()),
         backdropVisibility,
+        continuousBackdropCapture,
       }),
     });
   }

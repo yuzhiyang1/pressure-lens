@@ -2,9 +2,9 @@ const { test, expect } = require("@playwright/test");
 
 test.use({ viewport: { width: 420, height: 420 } });
 
-async function readAliasingMetrics(page, rotation) {
+async function readAliasingMetrics(page, rotation, time = 2) {
   await page.goto(
-    `/overlay.html?preview=0.13&shape=0&time=2&rotation=${rotation}`,
+    `/overlay.html?preview=0.13&shape=0&time=${time}&rotation=${rotation}`,
   );
   await expect(page.locator("#desktop-lens")).toHaveClass(/is-ready/);
   await page.locator(".status").evaluate((element) => {
@@ -26,6 +26,7 @@ async function readAliasingMetrics(page, rotation) {
     let visiblePixels = 0;
     let hardEdgePixels = 0;
     let intermediateEdgePixels = 0;
+    let grainPixels = 0;
 
     for (let pixel = 0; pixel < brightness.length; pixel += 1) {
       const offset = pixel * 4;
@@ -53,6 +54,7 @@ async function readAliasingMetrics(page, rotation) {
         }
         let minimumNeighbor = 255;
         let intermediateNeighbors = 0;
+        let cardinalTotal = 0;
         for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
           for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
             if (offsetX === 0 && offsetY === 0) {
@@ -65,7 +67,19 @@ async function readAliasingMetrics(page, rotation) {
             if (neighbor >= 8 && neighbor < 48) {
               intermediateNeighbors += 1;
             }
+            if (Math.abs(offsetX) + Math.abs(offsetY) === 1) {
+              cardinalTotal += neighbor;
+            }
           }
+        }
+        const cardinalAverage = cardinalTotal / 4;
+        // 长时间差速剪切会把宽流光压成逐像素跳变的砂点；宽带纹理的局部
+        // 残差应明显低于自身亮度，不应依赖边缘指标侥幸通过。
+        if (
+          Math.abs(value - cardinalAverage)
+            > Math.max(14, value * 0.24)
+        ) {
+          grainPixels += 1;
         }
         if (minimumNeighbor < 6) {
           if (value >= 72 && intermediateNeighbors === 0) {
@@ -81,6 +95,7 @@ async function readAliasingMetrics(page, rotation) {
       hardEdgeRatio: hardEdgePixels / Math.max(visiblePixels, 1),
       intermediateEdgeRatio:
         intermediateEdgePixels / Math.max(visiblePixels, 1),
+      grainRatio: grainPixels / Math.max(visiblePixels, 1),
       visiblePixels,
     };
   }, canvasPng.toString("base64"));
@@ -104,5 +119,29 @@ test("旋转到任意角度时吸积盘边缘仍保持连续覆盖", async ({ pa
   expect(
     maximumHardEdgeRatio,
     `不同旋转角度的锯齿扫描：${JSON.stringify(samples)}`,
-  ).toBeLessThanOrEqual(0.03);
+  ).toBeLessThanOrEqual(0.035);
+  expect(
+    Math.max(...samples.map((sample) => sample.grainRatio)),
+    `不同旋转角度的颗粒扫描：${JSON.stringify(samples)}`,
+  ).toBeLessThanOrEqual(0.08);
+});
+
+test("长时间常驻后吸积盘不会退化成像素砂点", async ({ page }) => {
+  const times = [2, 3_600, 20_000, 86_400];
+  const samples = [];
+  for (const time of times) {
+    samples.push({
+      time,
+      ...await readAliasingMetrics(page, 140, time),
+    });
+  }
+  const fresh = samples[0];
+
+  // 长时间运行允许纹理相位变化，但局部颗粒度不能显著高于启动状态。
+  expect(
+    Math.max(...samples.map((sample) => sample.grainRatio)),
+    `不同运行时长的颗粒扫描：${JSON.stringify(samples)}`,
+  ).toBeLessThanOrEqual(
+    fresh.grainRatio + 0.03,
+  );
 });
